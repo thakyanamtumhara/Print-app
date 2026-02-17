@@ -211,24 +211,32 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════
     private void startPrinterDiscovery() {
         nsdManager = (NsdManager) getSystemService(NSD_SERVICE);
-        if (nsdManager == null) return;
+        if (nsdManager == null) {
+            jsLog("NSD: NsdManager is NULL - cannot discover printers");
+            return;
+        }
+
+        jsLog("NSD: Starting printer discovery (_ipp._tcp + _ipps._tcp)...");
 
         discoveryListener = new NsdManager.DiscoveryListener() {
             @Override
             public void onDiscoveryStarted(String serviceType) {
                 Log.d(TAG, "Printer discovery started");
+                jsLog("NSD: discovery STARTED for " + serviceType);
             }
 
             @Override
             public void onServiceFound(NsdServiceInfo serviceInfo) {
                 String name = serviceInfo.getServiceName();
                 Log.d(TAG, "Printer found: " + name + " — resolving IP...");
+                jsLog("NSD: service FOUND: " + name + " — resolving...");
 
                 // Resolve to get IP and port before marking as connected
                 nsdManager.resolveService(serviceInfo, new NsdManager.ResolveListener() {
                     @Override
                     public void onResolveFailed(NsdServiceInfo si, int errorCode) {
                         Log.e(TAG, "Printer resolve failed: " + errorCode);
+                        jsLog("NSD: resolve FAILED for " + name + " error=" + errorCode);
                     }
 
                     @Override
@@ -247,7 +255,11 @@ public class MainActivity extends AppCompatActivity {
                         }
                         Log.d(TAG, "Printer ready: " + printerHost + ":" + printerPort
                             + " path=" + printerResourcePath);
+                        jsLog("NSD: RESOLVED " + name + " → " + printerHost + ":" + printerPort
+                            + " rp=" + printerResourcePath);
                         pushPrinterStatus(true);
+                        // Run connectivity check immediately
+                        diagnosePrinterConnectivity(printerHost);
                     }
                 });
             }
@@ -256,6 +268,7 @@ public class MainActivity extends AppCompatActivity {
             public void onServiceLost(NsdServiceInfo serviceInfo) {
                 String name = serviceInfo.getServiceName();
                 Log.d(TAG, "Printer lost: " + name);
+                jsLog("NSD: service LOST: " + name);
                 printerFound = false;
                 printerHost = null;
                 pushPrinterStatus(false);
@@ -264,16 +277,19 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onDiscoveryStopped(String serviceType) {
                 Log.d(TAG, "Printer discovery stopped");
+                jsLog("NSD: discovery STOPPED for " + serviceType);
             }
 
             @Override
             public void onStartDiscoveryFailed(String serviceType, int errorCode) {
                 Log.e(TAG, "Discovery start failed: " + errorCode);
+                jsLog("NSD: discovery START FAILED for " + serviceType + " error=" + errorCode);
             }
 
             @Override
             public void onStopDiscoveryFailed(String serviceType, int errorCode) {
                 Log.e(TAG, "Discovery stop failed: " + errorCode);
+                jsLog("NSD: discovery STOP FAILED error=" + errorCode);
             }
         };
 
@@ -281,19 +297,28 @@ public class MainActivity extends AppCompatActivity {
 
         // Also discover IPP over TLS — some printers only advertise _ipps._tcp
         discoveryListenerIpps = new NsdManager.DiscoveryListener() {
-            @Override public void onDiscoveryStarted(String serviceType) {}
-            @Override public void onDiscoveryStopped(String serviceType) {}
-            @Override public void onStartDiscoveryFailed(String serviceType, int errorCode) {}
+            @Override public void onDiscoveryStarted(String serviceType) {
+                jsLog("NSD: IPPS discovery STARTED");
+            }
+            @Override public void onDiscoveryStopped(String serviceType) {
+                jsLog("NSD: IPPS discovery STOPPED");
+            }
+            @Override public void onStartDiscoveryFailed(String serviceType, int errorCode) {
+                jsLog("NSD: IPPS discovery START FAILED error=" + errorCode);
+            }
             @Override public void onStopDiscoveryFailed(String serviceType, int errorCode) {}
 
             @Override
             public void onServiceFound(NsdServiceInfo serviceInfo) {
                 if (printerFound) return; // already found via _ipp._tcp
-                Log.d(TAG, "IPPS printer found: " + serviceInfo.getServiceName());
+                String name = serviceInfo.getServiceName();
+                Log.d(TAG, "IPPS printer found: " + name);
+                jsLog("NSD: IPPS service FOUND: " + name + " — resolving...");
                 nsdManager.resolveService(serviceInfo, new NsdManager.ResolveListener() {
                     @Override
                     public void onResolveFailed(NsdServiceInfo si, int errorCode) {
                         Log.e(TAG, "IPPS resolve failed: " + errorCode);
+                        jsLog("NSD: IPPS resolve FAILED error=" + errorCode);
                     }
                     @Override
                     public void onServiceResolved(NsdServiceInfo resolved) {
@@ -310,7 +335,9 @@ public class MainActivity extends AppCompatActivity {
                             }
                             Log.d(TAG, "IPPS printer ready: " + printerHost + ":" + printerPort
                                 + " path=" + printerResourcePath);
+                            jsLog("NSD: IPPS RESOLVED " + name + " → " + printerHost + ":" + printerPort);
                             pushPrinterStatus(true);
+                            diagnosePrinterConnectivity(printerHost);
                         }
                     }
                 });
@@ -329,7 +356,25 @@ public class MainActivity extends AppCompatActivity {
             nsdManager.discoverServices("_ipps._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListenerIpps);
         } catch (Exception e) {
             Log.e(TAG, "IPPS discovery failed to start", e);
+            jsLog("NSD: IPPS discoverServices threw: " + e.getMessage());
         }
+    }
+
+    // Stop and restart NSD discovery (called from JS bridge)
+    private void restartPrinterDiscovery() {
+        jsLog("NSD: Restarting discovery...");
+        if (nsdManager != null) {
+            try { nsdManager.stopServiceDiscovery(discoveryListener); } catch (Exception e) {}
+            try { nsdManager.stopServiceDiscovery(discoveryListenerIpps); } catch (Exception e) {}
+        }
+        printerFound = false;
+        printerHost = null;
+        printerResourcePath = null;
+        pushPrinterStatus(false);
+        // Short delay before restarting to let NSD clean up
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            startPrinterDiscovery();
+        }, 500);
     }
 
     private void pushPrinterStatus(boolean connected) {
@@ -1105,6 +1150,15 @@ public class MainActivity extends AppCompatActivity {
         public boolean isPrinterConnected() {
             Log.d(TAG, "JS Bridge: isPrinterConnected() → " + printerFound);
             return printerFound;
+        }
+
+        @JavascriptInterface
+        public void rediscoverPrinter() {
+            Log.d(TAG, "JS Bridge: rediscoverPrinter() called");
+            runOnUiThread(() -> {
+                restartPrinterDiscovery();
+                Toast.makeText(MainActivity.this, "Searching for printers...", Toast.LENGTH_SHORT).show();
+            });
         }
 
         @JavascriptInterface

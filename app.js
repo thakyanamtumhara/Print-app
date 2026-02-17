@@ -61,6 +61,19 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(checkPrinter, 5000);
   checkPrinter();
 
+  // Tap printer bar to retry discovery when printer not found
+  var printerBar = document.querySelector('.printer-bar');
+  if (printerBar) {
+    printerBar.style.cursor = 'pointer';
+    printerBar.addEventListener('click', function() {
+      if (window.AndroidBridge && typeof window.AndroidBridge.rediscoverPrinter === 'function') {
+        console.log('[PRINT-DEBUG] Tapped printer bar → rediscoverPrinter()');
+        window.AndroidBridge.rediscoverPrinter();
+        printerText.textContent = 'Searching...';
+      }
+    });
+  }
+
   // ── Copies ──
   function updateCopiesUI() {
     copiesValue.textContent = copies;
