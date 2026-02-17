@@ -60,6 +60,10 @@ public class MainActivity extends AppCompatActivity {
     private volatile String printerHost = null;
     private volatile int printerPort = 631;
 
+    // ── Page load state ──
+    private boolean pageLoaded = false;
+    private Uri pendingFileUri = null;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -74,7 +78,17 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
 
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                pageLoaded = true;
+                // If a file was opened before the page loaded, inject it now
+                if (pendingFileUri != null) {
+                    loadFileIntoWebView(pendingFileUri);
+                    pendingFileUri = null;
+                }
+            }
+        });
 
         // WebChromeClient with file picker support
         webView.setWebChromeClient(new WebChromeClient() {
@@ -239,7 +253,13 @@ public class MainActivity extends AppCompatActivity {
             currentFileUri = fileUri;
             currentMimeType = getContentResolver().getType(fileUri);
             currentFileName = getFileName(fileUri);
-            loadFileIntoWebView(fileUri);
+            if (pageLoaded) {
+                // Page already loaded (e.g. app was open, new file shared)
+                loadFileIntoWebView(fileUri);
+            } else {
+                // App just launched — wait for onPageFinished
+                pendingFileUri = fileUri;
+            }
         }
     }
 
