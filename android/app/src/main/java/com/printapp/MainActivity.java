@@ -735,6 +735,37 @@ public class MainActivity extends AppCompatActivity {
         return pages;
     }
 
+    // Convert JPEG image bytes to a single-page PDF document
+    // Brother printers natively understand PDF but NOT raw JPEG on port 9100
+    private byte[] jpegToPdf(byte[] jpegData) throws Exception {
+        Bitmap bmp = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.length);
+        if (bmp == null) throw new Exception("Failed to decode JPEG for PDF conversion");
+
+        // A4 in PostScript points (1 pt = 1/72 inch)
+        int pageWidthPt = 595;
+        int pageHeightPt = 842;
+
+        PdfDocument pdf = new PdfDocument();
+        PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
+            pageWidthPt, pageHeightPt, 1).create();
+        PdfDocument.Page page = pdf.startPage(pageInfo);
+
+        Canvas canvas = page.getCanvas();
+        // Draw bitmap scaled to fill the A4 page
+        canvas.drawBitmap(bmp, null,
+            new android.graphics.Rect(0, 0, pageWidthPt, pageHeightPt), null);
+
+        pdf.finishPage(page);
+
+        ByteArrayOutputStream pdfOut = new ByteArrayOutputStream();
+        pdf.writeTo(pdfOut);
+        pdf.close();
+        bmp.recycle();
+
+        jsLog("jpegToPdf: converted " + jpegData.length + " JPEG bytes → " + pdfOut.size() + " PDF bytes");
+        return pdfOut.toByteArray();
+    }
+
     // Quick TCP probe — returns true if port is accepting connections
     private boolean isPortOpen(String host, int port, int timeoutMs) {
         try {
@@ -777,82 +808,85 @@ public class MainActivity extends AppCompatActivity {
 
         Exception lastError = null;
 
-        // ─── Strategy 1: IPP on port 631 (only if open) ───
-        // Try just 2 paths with jpeg format only — no point trying many combos
-        if (port631Open) {
-            String[] ippPaths;
-            if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
-                String rp = printerResourcePath.startsWith("/")
-                    ? printerResourcePath : "/" + printerResourcePath;
-                ippPaths = new String[]{ rp, "/ipp/print" };
-            } else {
-                ippPaths = new String[]{ "/ipp/print", "/ipp/printer" };
-            }
-
-            for (String path : ippPaths) {
-                jsLog("sendIPP: trying IPP port 631 path=" + path);
-                try {
-                    trySendIPP(host, 631, path, imageData, copies, "image/jpeg");
-                    jsLog("=== sendIPP SUCCESS === port=631 path=" + path);
-                    printerPort = 631;
-                    printerResourcePath = path;
-                    return;
-                } catch (Exception e) {
-                    jsLog("sendIPP: IPP 631" + path + " FAILED: " + e.getMessage());
-                    lastError = e;
-                    // If connection times out, don't try another path on same port
-                    if (e.getMessage() != null && e.getMessage().contains("connect")) {
-                        jsLog("sendIPP: port 631 connect failed, skipping remaining IPP paths");
-                        break;
-                    }
-                }
-            }
-        } else {
-            jsLog("sendIPP: port 631 CLOSED, skipping IPP entirely");
+        // Convert JPEG to PDF once — reused by multiple strategies below
+        byte[] pdfData = null;
+        try {
+            pdfData = jpegToPdf(imageData);
+        } catch (Exception e) {
+            jsLog("sendIPP: PDF conversion failed: " + e.getMessage());
+            lastError = e;
         }
 
-        // ─── Strategy 2: Raw port 9100 (JetDirect) — PRIMARY for Brother ───
-        // This is the most reliable printing protocol for Brother mono lasers
-        // Try multiple raw format strategies
-        if (port9100Open) {
-            jsLog("sendIPP: trying port 9100 raw (JetDirect)...");
+        // ─── Strategy 1: PDF via port 9100 (JetDirect) — PRIMARY for Brother ───
+        // Brother mono lasers natively understand PDF on port 9100
+        // Raw JPEG does NOT work (causes garbled output / infinite pages)
+        if (port9100Open && pdfData != null) {
+            jsLog("sendIPP: trying port 9100 with PDF (JetDirect)...");
 
-            // Strategy A: PJL auto-detect — just send JPEG wrapped in PJL job
+            // Strategy A: PDF with PJL wrapper
             try {
-                trySendRaw9100_pjlAuto(host, imageData);
-                jsLog("=== sendRaw9100 (PJL auto) SUCCESS ===");
+                trySendRaw9100_pdf(host, pdfData);
+                jsLog("=== sendRaw9100 (PDF+PJL) SUCCESS ===");
                 return;
             } catch (Exception e) {
-                jsLog("sendRaw9100 PJL-auto FAILED: " + e.getMessage());
+                jsLog("sendRaw9100 PDF+PJL FAILED: " + e.getMessage());
                 lastError = e;
             }
 
             // Brief pause before retry — don't overwhelm printer
             Thread.sleep(1000);
 
-            // Strategy B: PCL with JPEG raster passthrough
+            // Strategy B: Raw PDF without PJL
             try {
-                trySendRaw9100_pcl(host, imageData);
-                jsLog("=== sendRaw9100 (PCL) SUCCESS ===");
+                trySendRaw9100_pdfNoPjl(host, pdfData);
+                jsLog("=== sendRaw9100 (PDF raw) SUCCESS ===");
                 return;
             } catch (Exception e) {
-                jsLog("sendRaw9100 PCL FAILED: " + e.getMessage());
+                jsLog("sendRaw9100 PDF-raw FAILED: " + e.getMessage());
                 lastError = e;
             }
-        } else {
-            jsLog("sendIPP: port 9100 CLOSED, no raw fallback available");
+        } else if (!port9100Open) {
+            jsLog("sendIPP: port 9100 CLOSED, skipping JetDirect");
         }
 
-        // ─── Strategy 3: Last resort — try IPP on port 80 (unlikely but worth one shot) ───
-        if (!port631Open && isPortOpen(host, 80, 2000)) {
-            jsLog("sendIPP: last resort — trying IPP on port 80...");
+        // ─── Strategy 2: IPP on port 631 with PDF format ───
+        if (port631Open && pdfData != null) {
+            String ippPath = "/ipp/print";
+            if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
+                ippPath = printerResourcePath.startsWith("/")
+                    ? printerResourcePath : "/" + printerResourcePath;
+            }
+            jsLog("sendIPP: trying IPP port 631 path=" + ippPath + " format=application/pdf");
             try {
-                trySendIPP(host, 80, "/ipp/print", imageData, copies, "image/jpeg");
-                jsLog("=== sendIPP SUCCESS === port=80 path=/ipp/print");
-                printerPort = 80;
+                trySendIPP(host, 631, ippPath, pdfData, copies, "application/pdf");
+                jsLog("=== sendIPP SUCCESS === port=631 path=" + ippPath + " format=pdf");
+                printerPort = 631;
+                printerResourcePath = ippPath;
                 return;
             } catch (Exception e) {
-                jsLog("sendIPP: IPP port 80 FAILED: " + e.getMessage());
+                jsLog("sendIPP: IPP 631 PDF FAILED: " + e.getMessage());
+                lastError = e;
+            }
+        } else if (!port631Open) {
+            jsLog("sendIPP: port 631 CLOSED, skipping IPP");
+        }
+
+        // ─── Strategy 3: IPP on port 631 with JPEG (unlikely for Brother but try) ───
+        if (port631Open) {
+            String ippPath = "/ipp/print";
+            if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
+                ippPath = printerResourcePath.startsWith("/")
+                    ? printerResourcePath : "/" + printerResourcePath;
+            }
+            jsLog("sendIPP: trying IPP port 631 path=" + ippPath + " format=image/jpeg");
+            try {
+                trySendIPP(host, 631, ippPath, imageData, copies, "image/jpeg");
+                jsLog("=== sendIPP SUCCESS === port=631 path=" + ippPath + " format=jpeg");
+                printerPort = 631;
+                printerResourcePath = ippPath;
+                return;
+            } catch (Exception e) {
+                jsLog("sendIPP: IPP 631 JPEG FAILED: " + e.getMessage());
                 lastError = e;
             }
         }
@@ -860,42 +894,32 @@ public class MainActivity extends AppCompatActivity {
         throw lastError != null ? lastError : new Exception("All print attempts failed");
     }
 
-    // ── Port 9100 Strategy A: PJL auto-detect ──
-    // Send JPEG wrapped in PJL job envelope — printer auto-detects format
-    // This is the simplest and most compatible approach for Brother printers
-    private void trySendRaw9100_pjlAuto(String host, byte[] jpegData) throws Exception {
-        jsLog("raw9100-pjlAuto: connecting to " + host + ":9100...");
+    // ── Port 9100 Strategy A: Send PDF via PJL ──
+    // Brother printers natively understand PDF on port 9100
+    private void trySendRaw9100_pdf(String host, byte[] pdfData) throws Exception {
+        jsLog("raw9100-pdf: connecting to " + host + ":9100...");
         Socket sock = new Socket();
         Network wifi = getWifiNetwork();
         if (wifi != null) wifi.bindSocket(sock);
         sock.connect(new InetSocketAddress(host, 9100), 5000);
         sock.setSoTimeout(30000);
-        jsLog("raw9100-pjlAuto: connected!");
+        jsLog("raw9100-pdf: connected!");
 
         OutputStream out = sock.getOutputStream();
 
-        // PJL job header — let printer auto-detect the data format
-        String header = "\u001B%-12345X@PJL\r\n"
-            + "@PJL SET RESOLUTION = 300\r\n"
-            + "@PJL SET PAPER = A4\r\n"
-            + "@PJL SET COPIES = 1\r\n"
-            + "@PJL ENTER LANGUAGE = PCL\r\n";
-
-        // PCL reset + simple JPEG output via HP-GL/2 or direct
-        // Actually, for Brother: just send raw JPEG after PJL, printer auto-detects
-        String enterAutoDetect = "\u001B%-12345X@PJL\r\n"
-            + "@PJL SET RESOLUTION = 300\r\n"
+        // PJL header — NO "ENTER LANGUAGE" so printer auto-detects PDF from %PDF- magic
+        String pjlHeader = "\u001B%-12345X@PJL\r\n"
             + "@PJL SET PAPER = A4\r\n"
             + "@PJL JOB NAME = \"iPrintScan\"\r\n"
             + "\r\n";  // empty line = end of PJL, start of data
 
-        String footer = "\u001B%-12345X@PJL EOJ\r\n\u001B%-12345X";
+        String pjlFooter = "\u001B%-12345X@PJL EOJ\r\n\u001B%-12345X";
 
-        out.write(enterAutoDetect.getBytes("ASCII"));
-        out.write(jpegData);
-        out.write(footer.getBytes("ASCII"));
+        out.write(pjlHeader.getBytes("ASCII"));
+        out.write(pdfData);
+        out.write(pjlFooter.getBytes("ASCII"));
         out.flush();
-        jsLog("raw9100-pjlAuto: " + jpegData.length + " bytes sent, waiting...");
+        jsLog("raw9100-pdf: " + pdfData.length + " PDF bytes sent, waiting...");
 
         // Read any response from printer (some send status back)
         try {
@@ -904,7 +928,7 @@ public class MainActivity extends AppCompatActivity {
             byte[] resp = new byte[1024];
             int n = in.read(resp);
             if (n > 0) {
-                jsLog("raw9100-pjlAuto: printer responded " + n + " bytes");
+                jsLog("raw9100-pdf: printer responded " + n + " bytes");
             }
         } catch (Exception ignored) {
             // Timeout reading response is normal
@@ -913,57 +937,31 @@ public class MainActivity extends AppCompatActivity {
         Thread.sleep(500);
         out.close();
         sock.close();
-        jsLog("raw9100-pjlAuto: done");
+        jsLog("raw9100-pdf: done");
     }
 
-    // ── Port 9100 Strategy B: PCL with JPEG raster passthrough ──
-    private void trySendRaw9100_pcl(String host, byte[] jpegData) throws Exception {
-        jsLog("raw9100-pcl: connecting to " + host + ":9100...");
+    // ── Port 9100 Strategy B: Raw PDF without PJL ──
+    // Some printers prefer just the PDF data without PJL wrapper
+    private void trySendRaw9100_pdfNoPjl(String host, byte[] pdfData) throws Exception {
+        jsLog("raw9100-pdfNoPjl: connecting to " + host + ":9100...");
         Socket sock = new Socket();
         Network wifi = getWifiNetwork();
         if (wifi != null) wifi.bindSocket(sock);
         sock.connect(new InetSocketAddress(host, 9100), 5000);
         sock.setSoTimeout(30000);
-        jsLog("raw9100-pcl: connected!");
+        jsLog("raw9100-pdfNoPjl: connected!");
 
         OutputStream out = sock.getOutputStream();
 
-        String pjlHeader = "\u001B%-12345X@PJL\r\n"
-            + "@PJL SET RESOLUTION = 300\r\n"
-            + "@PJL SET PAPER = A4\r\n"
-            + "@PJL ENTER LANGUAGE = PCL\r\n";
-
-        // PCL: Reset, A4, 300 DPI, start raster, JPEG compression mode
-        String pclSetup = "\u001BE"           // Reset
-            + "\u001B&l26A"                   // A4 paper size
-            + "\u001B*t300R"                  // 300 DPI resolution
-            + "\u001B*r0F"                    // Portrait orientation
-            + "\u001B*p0x0Y"                  // Cursor at 0,0
-            + "\u001B*r2480s3508T"            // Raster dimensions (A4 @ 300dpi)
-            + "\u001B*r1A"                    // Start raster graphics
-            + "\u001B*b2M";                   // Compression method: JPEG
-
-        // Transfer JPEG as a single raster block
-        String pclTransfer = "\u001B*b" + jpegData.length + "W";
-
-        String pclEnd = "\u001B*rC"           // End raster
-            + "\u001B&l0H"                    // Eject page
-            + "\u001BE";                      // Reset
-
-        String pjlFooter = "\u001B%-12345X@PJL\r\n@PJL EOJ\r\n\u001B%-12345X";
-
-        out.write(pjlHeader.getBytes("ASCII"));
-        out.write(pclSetup.getBytes("ASCII"));
-        out.write(pclTransfer.getBytes("ASCII"));
-        out.write(jpegData);
-        out.write(pclEnd.getBytes("ASCII"));
-        out.write(pjlFooter.getBytes("ASCII"));
+        // Send PDF directly — printer detects format from %PDF- header
+        out.write(pdfData);
         out.flush();
+        jsLog("raw9100-pdfNoPjl: " + pdfData.length + " PDF bytes sent");
 
         Thread.sleep(500);
         out.close();
         sock.close();
-        jsLog("raw9100-pcl: done, " + jpegData.length + " bytes sent");
+        jsLog("raw9100-pdfNoPjl: done");
     }
 
     private void trySendIPP(String host, int port, String path,
