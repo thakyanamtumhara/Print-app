@@ -20,6 +20,8 @@ document.addEventListener('DOMContentLoaded', () => {
   var fileInput = document.getElementById('fileInput');
 
   var copies = 1;
+  var pageImages = [];     // data-URL per PDF/image page (for printing)
+  var contentType = 'label'; // 'label' | 'pdf' | 'image'
 
   // ── Printer status ──
   // Android app: green/red blink based on actual WiFi detection
@@ -282,22 +284,46 @@ document.addEventListener('DOMContentLoaded', () => {
   // ══════════════════════════════════════════
   function buildPrintArea() {
     var layout = parseInt(layoutSelect.value, 10);
-    var html = labelContainer.innerHTML;
-    var img = whiteoutCanvas.toDataURL('image/png');
-    var hasMarks = strokes.length > 0;
-
     printArea.innerHTML = '';
-    printArea.className = 'layout-' + layout;
+    printArea.className = '';
 
-    for (var i = 0; i < layout; i++) {
-      var tile = document.createElement('div');
-      tile.className = 'print-tile';
-      var inner = '<div class="print-tile-content"><div class="label-container">' + html + '</div></div>';
-      if (hasMarks) {
-        inner += '<img class="print-tile-overlay" src="' + img + '">';
+    if ((contentType === 'pdf' || contentType === 'image') && pageImages.length > 0) {
+      // PDF: arrange actual pages onto sheets (e.g. 5 pages @ 4-per-sheet = 2 sheets)
+      // Image: N copies of the same image on one sheet
+      var pages = contentType === 'image'
+        ? Array(layout).fill(pageImages[0])
+        : pageImages;
+
+      for (var i = 0; i < pages.length; i += layout) {
+        var sheet = document.createElement('div');
+        sheet.className = 'print-sheet layout-' + layout;
+        for (var j = 0; j < layout && (i + j) < pages.length; j++) {
+          var tile = document.createElement('div');
+          tile.className = 'print-tile';
+          tile.innerHTML = '<img src="' + pages[i + j] + '">';
+          sheet.appendChild(tile);
+        }
+        printArea.appendChild(sheet);
       }
-      tile.innerHTML = inner;
-      printArea.appendChild(tile);
+    } else {
+      // Default label: N copies on one sheet
+      var sheet = document.createElement('div');
+      sheet.className = 'print-sheet layout-' + layout;
+      var html = labelContainer.innerHTML;
+      var whiteoutImg = whiteoutCanvas.toDataURL('image/png');
+      var hasMarks = strokes.length > 0;
+
+      for (var i = 0; i < layout; i++) {
+        var tile = document.createElement('div');
+        tile.className = 'print-tile';
+        var inner = '<div class="print-tile-content"><div class="label-container">' + html + '</div></div>';
+        if (hasMarks) {
+          inner += '<img class="print-tile-overlay" src="' + whiteoutImg + '">';
+        }
+        tile.innerHTML = inner;
+        sheet.appendChild(tile);
+      }
+      printArea.appendChild(sheet);
     }
   }
 
@@ -322,6 +348,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderPdfPages(pdfData) {
     labelContainer.innerHTML = '';
+    pageImages = [];
+    contentType = 'pdf';
     var container = document.createElement('div');
     container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px';
     labelContainer.appendChild(container);
@@ -332,7 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pdf.getPage(num).then(function(page) {
           var containerWidth = labelContainer.offsetWidth - 16;
           var vp = page.getViewport({ scale: 1 });
-          var scale = containerWidth / vp.width;
+          var scale = (containerWidth / vp.width) * 2; // 2x for print quality
           var scaled = page.getViewport({ scale: scale });
 
           var canvas = document.createElement('canvas');
@@ -342,6 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
           container.appendChild(canvas);
 
           page.render({ canvasContext: canvas.getContext('2d'), viewport: scaled }).promise.then(function() {
+            pageImages.push(canvas.toDataURL('image/png'));
             renderPage(num + 1);
           });
         });
@@ -366,6 +395,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function displayFile(file) {
     clearWhiteout();
     if (file.type.startsWith('image/')) {
+      contentType = 'image';
+      pageImages = [];
+      // Read as data URL for printing
+      var imgReader = new FileReader();
+      imgReader.onload = function() { pageImages = [imgReader.result]; };
+      imgReader.readAsDataURL(file);
       var url = URL.createObjectURL(file);
       labelContainer.innerHTML =
         '<div style="padding:12px;text-align:center">' +
@@ -378,6 +413,8 @@ document.addEventListener('DOMContentLoaded', () => {
       };
       reader.readAsArrayBuffer(file);
     } else {
+      contentType = 'label';
+      pageImages = [];
       labelContainer.innerHTML =
         '<div style="padding:32px 16px;text-align:center;color:#555">' +
         '<div style="font-size:15px;font-weight:600">' + file.name + '</div>' +
@@ -389,7 +426,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function displayFileFromBase64(name, mimeType, base64Data) {
     clearWhiteout();
     if (mimeType.startsWith('image/')) {
+      contentType = 'image';
       var dataUrl = 'data:' + mimeType + ';base64,' + base64Data;
+      pageImages = [dataUrl];
       labelContainer.innerHTML =
         '<div style="padding:12px;text-align:center">' +
         '<img src="' + dataUrl + '" style="max-width:100%;max-height:70vh;border-radius:4px;object-fit:contain">' +
@@ -397,6 +436,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (mimeType === 'application/pdf') {
       renderPdfPages({ data: base64ToUint8Array(base64Data) });
     } else {
+      contentType = 'label';
+      pageImages = [];
       labelContainer.innerHTML =
         '<div style="padding:32px 16px;text-align:center;color:#555">' +
         '<div style="font-size:15px;font-weight:600">' + name + '</div>' +

@@ -400,30 +400,39 @@ html, body {
   }
 
   #printArea {
-    display: grid !important;
+    display: block !important;
+  }
+
+  .print-sheet {
+    display: grid;
     width: 100%;
     height: 100vh;
     padding: 5mm;
-    gap: 4mm;
+    gap: 2mm;
+    box-sizing: border-box;
+    page-break-after: always;
+  }
+
+  .print-sheet:last-child {
     page-break-after: avoid;
   }
 
-  #printArea.layout-1 {
+  .print-sheet.layout-1 {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
   }
 
-  #printArea.layout-2 {
+  .print-sheet.layout-2 {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;
   }
 
-  #printArea.layout-3 {
+  .print-sheet.layout-3 {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr 1fr;
   }
 
-  #printArea.layout-4 {
+  .print-sheet.layout-4 {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
   }
@@ -432,6 +441,12 @@ html, body {
     position: relative;
     overflow: hidden;
     border: 0.5px solid #eee;
+  }
+
+  .print-tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
 
   .print-tile-content {
