@@ -428,15 +428,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // ══════════════════════════════════════════
   function buildPrintArea() {
     var layout = parseInt(layoutSelect.value, 10);
+    console.log('[PRINT-DEBUG] buildPrintArea: contentType=' + contentType
+      + ' pageImages.length=' + pageImages.length + ' layout=' + layout);
     printArea.innerHTML = '';
     printArea.className = '';
 
     if ((contentType === 'pdf' || contentType === 'image') && pageImages.length > 0) {
-      // PDF: arrange actual pages onto sheets (e.g. 5 pages @ 4-per-sheet = 2 sheets)
-      // Image: N copies of the same image on one sheet
       var pages = contentType === 'image'
         ? Array(layout).fill(pageImages[0])
         : pageImages;
+      console.log('[PRINT-DEBUG] buildPrintArea: PDF/Image path, pages=' + pages.length);
 
       for (var i = 0; i < pages.length; i += layout) {
         var sheet = document.createElement('div');
@@ -449,13 +450,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         printArea.appendChild(sheet);
       }
+      console.log('[PRINT-DEBUG] buildPrintArea: created ' + printArea.children.length + ' sheets');
     } else {
-      // Default label: N copies on one sheet
+      console.log('[PRINT-DEBUG] buildPrintArea: Label path, layout=' + layout);
       var sheet = document.createElement('div');
       sheet.className = 'print-sheet layout-' + layout;
       var html = labelContainer.innerHTML;
+      console.log('[PRINT-DEBUG] buildPrintArea: labelContainer HTML length=' + html.length);
       var whiteoutImg = whiteoutCanvas.toDataURL('image/png');
       var hasMarks = strokes.length > 0;
+      console.log('[PRINT-DEBUG] buildPrintArea: hasMarks=' + hasMarks + ' strokes=' + strokes.length);
 
       for (var i = 0; i < layout; i++) {
         var tile = document.createElement('div');
@@ -468,46 +472,58 @@ document.addEventListener('DOMContentLoaded', () => {
         sheet.appendChild(tile);
       }
       printArea.appendChild(sheet);
+      console.log('[PRINT-DEBUG] buildPrintArea: created 1 sheet with ' + layout + ' tiles');
     }
   }
 
   var isPrinting = false;
   printBtn.addEventListener('click', function() {
-    if (isPrinting) return;
+    console.log('[PRINT-DEBUG] Print button clicked. isPrinting=' + isPrinting
+      + ' contentType=' + contentType + ' copies=' + copies
+      + ' pageImages.length=' + pageImages.length
+      + ' isAndroid=' + !!(window.AndroidBridge && window.AndroidBridge.isAndroid()));
+
+    if (isPrinting) {
+      console.log('[PRINT-DEBUG] Print BLOCKED — already printing');
+      return;
+    }
     isPrinting = true;
     printBtn.disabled = true;
     try {
       buildPrintArea();
       if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
         if ((contentType === 'pdf' || contentType === 'image') && pageImages.length > 0) {
-          // Direct IPP print — no system dialog
           var layout = parseInt(layoutSelect.value, 10);
+          console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirect() layout=' + layout
+            + ' copies=' + copies + ' pages=' + pageImages.length);
           window.AndroidBridge.printDirect(JSON.stringify(pageImages), layout, copies);
         } else {
-          // Label/HTML — fallback to system dialog
+          console.log('[PRINT-DEBUG] Calling AndroidBridge.print() copies=' + copies);
           window.AndroidBridge.print(copies);
         }
       } else {
+        console.log('[PRINT-DEBUG] Calling window.print() (browser path)');
         window.print();
       }
     } catch (err) {
-      console.error('Print failed: ' + err.message);
-      // Try system dialog as last resort
+      console.error('[PRINT-DEBUG] Print FAILED: ' + err.message + '\n' + err.stack);
       try {
         if (window.AndroidBridge) {
+          console.log('[PRINT-DEBUG] Trying fallback: AndroidBridge.print()');
           window.AndroidBridge.print(copies);
         } else {
+          console.log('[PRINT-DEBUG] Trying fallback: window.print()');
           window.print();
         }
       } catch (e2) {
-        console.error('Fallback print also failed: ' + e2.message);
+        console.error('[PRINT-DEBUG] Fallback also FAILED: ' + e2.message);
       }
     } finally {
       // Block re-prints for 5 seconds to prevent duplicate jobs
-      // (IPP printing is async and takes time to reach the printer)
       setTimeout(function() {
         isPrinting = false;
         printBtn.disabled = false;
+        console.log('[PRINT-DEBUG] Print button re-enabled');
       }, 5000);
     }
   });

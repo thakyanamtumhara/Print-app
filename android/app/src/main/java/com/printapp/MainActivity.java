@@ -37,6 +37,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
@@ -459,7 +461,13 @@ public class MainActivity extends AppCompatActivity {
     // ── DIRECT IPP PRINTING ──
     // ══════════════════════════════════════════
     private void printDirectIPP(String pagesJson, int layout, int copies) {
+        Log.d(TAG, "=== printDirectIPP START === layout=" + layout + " copies=" + copies
+            + " printerHost=" + printerHost + " printerPort=" + printerPort
+            + " resourcePath=" + printerResourcePath);
+        Log.d(TAG, "printDirectIPP: pagesJson length=" + (pagesJson != null ? pagesJson.length() : "null"));
+
         if (printerHost == null) {
+            Log.w(TAG, "printDirectIPP: printerHost is null, falling back to system dialog");
             runOnUiThread(() -> {
                 Toast.makeText(this, "Printer not ready, using system dialog", Toast.LENGTH_SHORT).show();
                 printViaSystemDialog(copies);
@@ -470,19 +478,33 @@ public class MainActivity extends AppCompatActivity {
         new Thread(() -> {
             try {
                 JSONArray arr = new JSONArray(pagesJson);
+                Log.d(TAG, "printDirectIPP: parsed " + arr.length() + " page data URLs");
                 String[] pageDataUrls = new String[arr.length()];
                 for (int i = 0; i < arr.length(); i++) {
                     pageDataUrls[i] = arr.getString(i);
+                    Log.d(TAG, "printDirectIPP: page[" + i + "] dataUrl length="
+                        + pageDataUrls[i].length()
+                        + " prefix=" + pageDataUrls[i].substring(0, Math.min(50, pageDataUrls[i].length())));
                 }
 
-                byte[] pdfData = createPdfFromImages(pageDataUrls, layout);
-                sendIPP(pdfData, copies);
+                Log.d(TAG, "printDirectIPP: creating JPEG pages...");
+                List<byte[]> jpegPages = createJpegPages(pageDataUrls, layout);
+                Log.d(TAG, "printDirectIPP: created " + jpegPages.size() + " JPEG pages");
 
+                for (int p = 0; p < jpegPages.size(); p++) {
+                    byte[] jpegData = jpegPages.get(p);
+                    Log.d(TAG, "printDirectIPP: sending page " + (p + 1) + "/" + jpegPages.size()
+                        + " size=" + jpegData.length + " bytes");
+                    sendIPP(jpegData, copies);
+                    Log.d(TAG, "printDirectIPP: page " + (p + 1) + " sent successfully");
+                }
+
+                Log.d(TAG, "=== printDirectIPP SUCCESS ===");
                 runOnUiThread(() ->
                     Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
 
             } catch (Exception e) {
-                Log.e(TAG, "Direct print failed: " + e.getMessage(), e);
+                Log.e(TAG, "=== printDirectIPP FAILED === " + e.getMessage(), e);
                 final String errMsg = e.getMessage();
                 runOnUiThread(() -> {
                     Toast.makeText(this, "IPP failed: " + errMsg, Toast.LENGTH_LONG).show();
@@ -492,13 +514,15 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    private byte[] createPdfFromImages(String[] imageDataUrls, int layout) throws Exception {
-        PdfDocument pdf = new PdfDocument();
+    private List<byte[]> createJpegPages(String[] imageDataUrls, int layout) throws Exception {
+        Log.d(TAG, "createJpegPages: images=" + imageDataUrls.length + " layout=" + layout);
+        List<byte[]> pages = new ArrayList<>();
 
-        int pageWidth = 595;
-        int pageHeight = 842;
-        int padding = 14;
-        int gap = 6;
+        // A4 at 300 DPI
+        int pageWidth = 2480;
+        int pageHeight = 3508;
+        int padding = 58;
+        int gap = 25;
 
         int cols, rows;
         switch (layout) {
@@ -510,12 +534,14 @@ public class MainActivity extends AppCompatActivity {
 
         int cellWidth  = (pageWidth  - 2 * padding - (cols - 1) * gap) / cols;
         int cellHeight = (pageHeight - 2 * padding - (rows - 1) * gap) / rows;
+        Log.d(TAG, "createJpegPages: page=" + pageWidth + "x" + pageHeight
+            + " cell=" + cellWidth + "x" + cellHeight
+            + " grid=" + cols + "x" + rows);
 
         for (int i = 0; i < imageDataUrls.length; i += layout) {
-            PdfDocument.PageInfo pageInfo =
-                new PdfDocument.PageInfo.Builder(pageWidth, pageHeight, i / layout + 1).create();
-            PdfDocument.Page page = pdf.startPage(pageInfo);
-            Canvas canvas = page.getCanvas();
+            Log.d(TAG, "createJpegPages: creating sheet starting at image " + i);
+            Bitmap pageBitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.RGB_565);
+            Canvas canvas = new Canvas(pageBitmap);
             canvas.drawColor(0xFFFFFFFF);
 
             for (int j = 0; j < layout && (i + j) < imageDataUrls.length; j++) {
@@ -526,11 +552,19 @@ public class MainActivity extends AppCompatActivity {
 
                 String dataUrl = imageDataUrls[i + j];
                 int commaIdx = dataUrl.indexOf(',');
-                if (commaIdx < 0) continue;
+                if (commaIdx < 0) {
+                    Log.w(TAG, "createJpegPages: image[" + (i + j) + "] has no comma in dataUrl, skipping");
+                    continue;
+                }
                 String b64 = dataUrl.substring(commaIdx + 1);
+                Log.d(TAG, "createJpegPages: decoding image[" + (i + j) + "] base64 length=" + b64.length());
                 byte[] imgBytes = Base64.decode(b64, Base64.DEFAULT);
                 Bitmap bmp = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.length);
-                if (bmp == null) continue;
+                if (bmp == null) {
+                    Log.e(TAG, "createJpegPages: image[" + (i + j) + "] failed to decode bitmap!");
+                    continue;
+                }
+                Log.d(TAG, "createJpegPages: image[" + (i + j) + "] decoded " + bmp.getWidth() + "x" + bmp.getHeight());
 
                 float scale = Math.min(
                     (float) cellWidth / bmp.getWidth(),
@@ -548,18 +582,29 @@ public class MainActivity extends AppCompatActivity {
                 scaled.recycle();
             }
 
-            pdf.finishPage(page);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            pageBitmap.compress(Bitmap.CompressFormat.JPEG, 92, out);
+            pageBitmap.recycle();
+            Log.d(TAG, "createJpegPages: sheet " + (pages.size() + 1) + " JPEG size=" + out.size() + " bytes");
+            pages.add(out.toByteArray());
         }
 
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        pdf.writeTo(out);
-        pdf.close();
-        return out.toByteArray();
+        Log.d(TAG, "createJpegPages: total " + pages.size() + " JPEG pages created");
+        return pages;
     }
 
-    private void sendIPP(byte[] pdfData, int copies) throws Exception {
+    private void sendIPP(byte[] imageData, int copies) throws Exception {
         String host = printerHost;
         int port = printerPort;
+        Log.d(TAG, "=== sendIPP START === dataSize=" + imageData.length
+            + " copies=" + copies + " host=" + host + ":" + port);
+
+        // Log first few bytes to verify JPEG magic (FF D8 FF)
+        if (imageData.length >= 3) {
+            Log.d(TAG, "sendIPP: data magic bytes: "
+                + String.format("%02x %02x %02x", imageData[0], imageData[1], imageData[2])
+                + (imageData[0] == (byte) 0xFF && imageData[1] == (byte) 0xD8 ? " (valid JPEG)" : " (NOT JPEG!)"));
+        }
 
         // Build list of paths to try: NSD rp first, then common Brother paths
         String[] pathsToTry;
@@ -570,26 +615,44 @@ public class MainActivity extends AppCompatActivity {
         } else {
             pathsToTry = new String[]{ "/ipp/print", "/ipp/printer", "/ipp" };
         }
+        Log.d(TAG, "sendIPP: paths to try: " + java.util.Arrays.toString(pathsToTry));
+
+        // Try formats: JPEG first (widely supported), then octet-stream (auto-detect)
+        String[] formatsToTry = { "image/jpeg", "application/octet-stream" };
 
         Exception lastError = null;
-        for (String path : pathsToTry) {
-            try {
-                trySendIPP(host, port, path, pdfData, copies);
-                Log.d(TAG, "IPP succeeded with path: " + path);
-                // Remember working path for next time
-                printerResourcePath = path;
-                return;
-            } catch (Exception e) {
-                Log.w(TAG, "IPP failed with path " + path + ": " + e.getMessage());
-                lastError = e;
+        int attempt = 0;
+        for (String format : formatsToTry) {
+            for (String path : pathsToTry) {
+                attempt++;
+                Log.d(TAG, "sendIPP: attempt #" + attempt + " path=" + path + " format=" + format);
+                try {
+                    trySendIPP(host, port, path, imageData, copies, format);
+                    Log.d(TAG, "=== sendIPP SUCCESS === path=" + path + " format=" + format);
+                    // Remember working path for next time
+                    printerResourcePath = path;
+                    return;
+                } catch (Exception e) {
+                    String msg = e.getMessage();
+                    Log.w(TAG, "sendIPP: attempt #" + attempt + " FAILED: " + msg);
+                    lastError = e;
+                    // If format not supported (0x040a), skip to next format
+                    if (msg != null && msg.contains("0x40a")) {
+                        Log.d(TAG, "sendIPP: format " + format + " not supported, trying next format");
+                        break;
+                    }
+                }
             }
         }
-        throw lastError != null ? lastError : new Exception("All IPP paths failed");
+        Log.e(TAG, "=== sendIPP FAILED === all " + attempt + " attempts exhausted");
+        throw lastError != null ? lastError : new Exception("All IPP attempts failed");
     }
 
     private void trySendIPP(String host, int port, String path,
-                             byte[] pdfData, int copies) throws Exception {
+                             byte[] data, int copies, String documentFormat) throws Exception {
         String printerUri = "ipp://" + host + ":" + port + path;
+        Log.d(TAG, "trySendIPP: uri=" + printerUri + " format=" + documentFormat
+            + " dataSize=" + data.length + " copies=" + copies);
 
         URL url = new URL("http://" + host + ":" + port + path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -615,8 +678,7 @@ public class MainActivity extends AppCompatActivity {
         writeIPPString(ipp, 0x45, "printer-uri", printerUri);
         writeIPPString(ipp, 0x42, "requesting-user-name", "iPrintScan");
         writeIPPString(ipp, 0x42, "job-name", "iPrint&Scan Job");
-        // Explicitly tell printer the data is PDF
-        writeIPPString(ipp, 0x49, "document-format", "application/pdf");
+        writeIPPString(ipp, 0x49, "document-format", documentFormat);
 
         // Job attributes
         ipp.write(0x02);
@@ -627,7 +689,7 @@ public class MainActivity extends AppCompatActivity {
 
         OutputStream out = conn.getOutputStream();
         out.write(ipp.toByteArray());
-        out.write(pdfData);
+        out.write(data);
         out.flush();
         out.close();
 
@@ -715,14 +777,17 @@ public class MainActivity extends AppCompatActivity {
 
     // ── Fallback: Android system print dialog ──
     private void printViaSystemDialog(int copies) {
+        Log.d(TAG, "=== printViaSystemDialog START === copies=" + copies);
         PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
         if (printManager == null) {
-            Log.e(TAG, "PrintManager is null");
+            Log.e(TAG, "printViaSystemDialog: PrintManager is null!");
             Toast.makeText(this, "Print service not available", Toast.LENGTH_SHORT).show();
             return;
         }
 
         String jobName = "iPrint&Scan - " + (currentFileName != null ? currentFileName : "Label");
+        Log.d(TAG, "printViaSystemDialog: jobName=" + jobName);
+
         PrintAttributes attributes = new PrintAttributes.Builder()
             .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
             .setColorMode(PrintAttributes.COLOR_MODE_MONOCHROME)
@@ -731,8 +796,9 @@ public class MainActivity extends AppCompatActivity {
         try {
             PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
             printManager.print(jobName, adapter, attributes);
+            Log.d(TAG, "printViaSystemDialog: system dialog launched");
         } catch (Exception e) {
-            Log.e(TAG, "System print failed: " + e.getMessage(), e);
+            Log.e(TAG, "printViaSystemDialog FAILED: " + e.getMessage(), e);
             Toast.makeText(this, "Print failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
@@ -746,14 +812,19 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ── Direct IPP for labels (WebView → PdfDocument → IPP) ──
+    // ── Direct IPP for labels (WebView → JPEG → IPP) ──
     private void printLabelDirectIPP(int copies) {
+        Log.d(TAG, "=== printLabelDirectIPP START === copies=" + copies
+            + " printerHost=" + printerHost + " printerPort=" + printerPort);
+
         if (printerHost == null) {
+            Log.w(TAG, "printLabelDirectIPP: printerHost null, falling back to system dialog");
             printViaSystemDialog(copies);
             return;
         }
 
         // Switch WebView to print view (hide app UI, show printArea)
+        Log.d(TAG, "printLabelDirectIPP: switching WebView to print view");
         webView.evaluateJavascript(
             "(function(){" +
             "  document.querySelector('.app').style.display='none';" +
@@ -761,44 +832,54 @@ public class MainActivity extends AppCompatActivity {
             "  pa.style.display='block';" +
             "  pa.style.position='relative';" +
             "  pa.style.background='#fff';" +
-            "  return 'ok';" +
+            "  var info='printArea children: '+pa.children.length;" +
+            "  if(pa.children.length>0) info+=' firstChild: '+pa.children[0].className;" +
+            "  info+=' printArea.offsetHeight='+pa.offsetHeight;" +
+            "  return info;" +
             "})()",
             value -> {
+                Log.d(TAG, "printLabelDirectIPP: JS returned: " + value);
                 // Wait for WebView to re-render with print content
                 webView.postDelayed(() -> {
                     try {
-                        // Create PDF from WebView content using PdfDocument
-                        PdfDocument doc = new PdfDocument();
-                        int pdfWidth = 595;  // A4 at 72 DPI
-                        int pdfHeight = 842;
-                        PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
-                            pdfWidth, pdfHeight, 1).create();
-                        PdfDocument.Page page = doc.startPage(pageInfo);
+                        Log.d(TAG, "printLabelDirectIPP: webView size="
+                            + webView.getWidth() + "x" + webView.getHeight()
+                            + " contentHeight=" + webView.getContentHeight());
 
-                        Canvas canvas = page.getCanvas();
-                        float scale = (float) pdfWidth / webView.getWidth();
+                        // Render WebView content to a high-resolution JPEG
+                        int bmpWidth = 2480;   // A4 at 300 DPI
+                        int bmpHeight = 3508;
+
+                        Log.d(TAG, "printLabelDirectIPP: creating bitmap " + bmpWidth + "x" + bmpHeight);
+                        Bitmap pageBitmap = Bitmap.createBitmap(
+                            bmpWidth, bmpHeight, Bitmap.Config.RGB_565);
+                        Canvas canvas = new Canvas(pageBitmap);
+                        canvas.drawColor(0xFFFFFFFF);
+
+                        float scale = (float) bmpWidth / webView.getWidth();
+                        Log.d(TAG, "printLabelDirectIPP: scale factor=" + scale);
                         canvas.scale(scale, scale);
                         webView.draw(canvas);
 
-                        doc.finishPage(page);
-
                         ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                        doc.writeTo(bos);
-                        doc.close();
-                        byte[] pdfData = bos.toByteArray();
+                        pageBitmap.compress(Bitmap.CompressFormat.JPEG, 92, bos);
+                        pageBitmap.recycle();
+                        byte[] jpegData = bos.toByteArray();
+                        Log.d(TAG, "printLabelDirectIPP: JPEG created, size=" + jpegData.length + " bytes");
 
                         // Restore UI
                         restoreWebViewUI();
 
-                        // Send PDF to printer on background thread
+                        // Send JPEG to printer on background thread
                         new Thread(() -> {
                             try {
-                                sendIPP(pdfData, copies);
+                                sendIPP(jpegData, copies);
+                                Log.d(TAG, "=== printLabelDirectIPP SUCCESS ===");
                                 runOnUiThread(() ->
                                     Toast.makeText(MainActivity.this,
                                         "Sent to printer", Toast.LENGTH_SHORT).show());
                             } catch (Exception e) {
-                                Log.e(TAG, "Label IPP failed", e);
+                                Log.e(TAG, "=== printLabelDirectIPP FAILED (IPP) === " + e.getMessage(), e);
                                 runOnUiThread(() -> {
                                     Toast.makeText(MainActivity.this,
                                         "Direct print failed, using dialog",
@@ -808,7 +889,7 @@ public class MainActivity extends AppCompatActivity {
                             }
                         }).start();
                     } catch (Exception e) {
-                        Log.e(TAG, "Label direct print failed", e);
+                        Log.e(TAG, "=== printLabelDirectIPP FAILED (render) === " + e.getMessage(), e);
                         restoreWebViewUI();
                         printViaSystemDialog(copies);
                     }
@@ -833,11 +914,15 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void print(int copies) {
+            Log.d(TAG, ">>> JS Bridge: print() called, copies=" + copies
+                + " printerFound=" + printerFound + " printerHost=" + printerHost);
             runOnUiThread(() -> {
                 if (printerFound && printerHost != null) {
+                    Log.d(TAG, "JS Bridge: printer found, using direct IPP (label path)");
                     // Delay briefly to let buildPrintArea DOM changes render
                     webView.postDelayed(() -> printLabelDirectIPP(copies), 300);
                 } else {
+                    Log.d(TAG, "JS Bridge: no printer, using system dialog");
                     printViaSystemDialog(copies);
                 }
             });
@@ -845,6 +930,9 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void printDirect(String pagesJson, int layout, int copies) {
+            Log.d(TAG, ">>> JS Bridge: printDirect() called, layout=" + layout
+                + " copies=" + copies + " pagesJson length="
+                + (pagesJson != null ? pagesJson.length() : "null"));
             printDirectIPP(pagesJson, layout, copies);
         }
 
@@ -855,6 +943,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public boolean isPrinterConnected() {
+            Log.d(TAG, "JS Bridge: isPrinterConnected() → " + printerFound);
             return printerFound;
         }
 
