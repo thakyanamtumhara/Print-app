@@ -615,8 +615,8 @@ public class MainActivity extends AppCompatActivity {
         writeIPPString(ipp, 0x45, "printer-uri", printerUri);
         writeIPPString(ipp, 0x42, "requesting-user-name", "iPrintScan");
         writeIPPString(ipp, 0x42, "job-name", "iPrint&Scan Job");
-        // Use octet-stream so printer auto-detects format
-        writeIPPString(ipp, 0x49, "document-format", "application/octet-stream");
+        // Explicitly tell printer the data is PDF
+        writeIPPString(ipp, 0x49, "document-format", "application/pdf");
 
         // Job attributes
         ipp.write(0x02);
