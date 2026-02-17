@@ -67,6 +67,17 @@ public class MainActivity extends AppCompatActivity {
 
     // ── Pending file (read immediately, inject after page load) ──
     private boolean pageLoaded = false;
+
+    // Forward native log to WebView console so it's visible in Chrome DevTools
+    private void jsLog(String msg) {
+        final String escaped = msg.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n");
+        runOnUiThread(() -> {
+            if (webView != null) {
+                webView.evaluateJavascript(
+                    "console.log('[NATIVE] " + escaped + "')", null);
+            }
+        });
+    }
     private String pendingFileName = null;
     private String pendingMimeType = null;
     private String pendingBase64Data = null;
@@ -464,10 +475,13 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "=== printDirectIPP START === layout=" + layout + " copies=" + copies
             + " printerHost=" + printerHost + " printerPort=" + printerPort
             + " resourcePath=" + printerResourcePath);
+        jsLog("=== printDirectIPP START === layout=" + layout + " copies=" + copies
+            + " host=" + printerHost + ":" + printerPort + " rp=" + printerResourcePath);
         Log.d(TAG, "printDirectIPP: pagesJson length=" + (pagesJson != null ? pagesJson.length() : "null"));
 
         if (printerHost == null) {
             Log.w(TAG, "printDirectIPP: printerHost is null, falling back to system dialog");
+            jsLog("printDirectIPP: printerHost is NULL → system dialog fallback");
             runOnUiThread(() -> {
                 Toast.makeText(this, "Printer not ready, using system dialog", Toast.LENGTH_SHORT).show();
                 printViaSystemDialog(copies);
@@ -479,32 +493,41 @@ public class MainActivity extends AppCompatActivity {
             try {
                 JSONArray arr = new JSONArray(pagesJson);
                 Log.d(TAG, "printDirectIPP: parsed " + arr.length() + " page data URLs");
+                jsLog("printDirectIPP: parsed " + arr.length() + " page data URLs");
                 String[] pageDataUrls = new String[arr.length()];
                 for (int i = 0; i < arr.length(); i++) {
                     pageDataUrls[i] = arr.getString(i);
                     Log.d(TAG, "printDirectIPP: page[" + i + "] dataUrl length="
                         + pageDataUrls[i].length()
                         + " prefix=" + pageDataUrls[i].substring(0, Math.min(50, pageDataUrls[i].length())));
+                    jsLog("printDirectIPP: page[" + i + "] dataUrl len=" + pageDataUrls[i].length());
                 }
 
                 Log.d(TAG, "printDirectIPP: creating JPEG pages...");
+                jsLog("printDirectIPP: creating JPEG pages...");
                 List<byte[]> jpegPages = createJpegPages(pageDataUrls, layout);
                 Log.d(TAG, "printDirectIPP: created " + jpegPages.size() + " JPEG pages");
+                jsLog("printDirectIPP: created " + jpegPages.size() + " JPEG sheets");
 
                 for (int p = 0; p < jpegPages.size(); p++) {
                     byte[] jpegData = jpegPages.get(p);
                     Log.d(TAG, "printDirectIPP: sending page " + (p + 1) + "/" + jpegPages.size()
                         + " size=" + jpegData.length + " bytes");
+                    jsLog("printDirectIPP: sending sheet " + (p + 1) + "/" + jpegPages.size()
+                        + " size=" + jpegData.length + " bytes");
                     sendIPP(jpegData, copies);
                     Log.d(TAG, "printDirectIPP: page " + (p + 1) + " sent successfully");
+                    jsLog("printDirectIPP: sheet " + (p + 1) + " sent OK");
                 }
 
                 Log.d(TAG, "=== printDirectIPP SUCCESS ===");
+                jsLog("=== printDirectIPP SUCCESS ===");
                 runOnUiThread(() ->
                     Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
 
             } catch (Exception e) {
                 Log.e(TAG, "=== printDirectIPP FAILED === " + e.getMessage(), e);
+                jsLog("=== printDirectIPP FAILED === " + e.getMessage());
                 final String errMsg = e.getMessage();
                 runOnUiThread(() -> {
                     Toast.makeText(this, "IPP failed: " + errMsg, Toast.LENGTH_LONG).show();
@@ -516,6 +539,7 @@ public class MainActivity extends AppCompatActivity {
 
     private List<byte[]> createJpegPages(String[] imageDataUrls, int layout) throws Exception {
         Log.d(TAG, "createJpegPages: images=" + imageDataUrls.length + " layout=" + layout);
+        jsLog("createJpegPages: images=" + imageDataUrls.length + " layout=" + layout);
         List<byte[]> pages = new ArrayList<>();
 
         // A4 at 300 DPI
@@ -537,9 +561,11 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "createJpegPages: page=" + pageWidth + "x" + pageHeight
             + " cell=" + cellWidth + "x" + cellHeight
             + " grid=" + cols + "x" + rows);
+        jsLog("createJpegPages: grid=" + cols + "x" + rows + " cell=" + cellWidth + "x" + cellHeight);
 
         for (int i = 0; i < imageDataUrls.length; i += layout) {
             Log.d(TAG, "createJpegPages: creating sheet starting at image " + i);
+            jsLog("createJpegPages: sheet starting at image " + i);
             Bitmap pageBitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.RGB_565);
             Canvas canvas = new Canvas(pageBitmap);
             canvas.drawColor(0xFFFFFFFF);
@@ -554,6 +580,7 @@ public class MainActivity extends AppCompatActivity {
                 int commaIdx = dataUrl.indexOf(',');
                 if (commaIdx < 0) {
                     Log.w(TAG, "createJpegPages: image[" + (i + j) + "] has no comma in dataUrl, skipping");
+                    jsLog("createJpegPages: image[" + (i + j) + "] SKIP - no comma in dataUrl!");
                     continue;
                 }
                 String b64 = dataUrl.substring(commaIdx + 1);
@@ -562,9 +589,11 @@ public class MainActivity extends AppCompatActivity {
                 Bitmap bmp = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.length);
                 if (bmp == null) {
                     Log.e(TAG, "createJpegPages: image[" + (i + j) + "] failed to decode bitmap!");
+                    jsLog("createJpegPages: image[" + (i + j) + "] FAILED to decode bitmap!");
                     continue;
                 }
                 Log.d(TAG, "createJpegPages: image[" + (i + j) + "] decoded " + bmp.getWidth() + "x" + bmp.getHeight());
+                jsLog("createJpegPages: image[" + (i + j) + "] decoded " + bmp.getWidth() + "x" + bmp.getHeight());
 
                 float scale = Math.min(
                     (float) cellWidth / bmp.getWidth(),
@@ -586,10 +615,12 @@ public class MainActivity extends AppCompatActivity {
             pageBitmap.compress(Bitmap.CompressFormat.JPEG, 92, out);
             pageBitmap.recycle();
             Log.d(TAG, "createJpegPages: sheet " + (pages.size() + 1) + " JPEG size=" + out.size() + " bytes");
+            jsLog("createJpegPages: sheet " + (pages.size() + 1) + " JPEG size=" + out.size() + " bytes");
             pages.add(out.toByteArray());
         }
 
         Log.d(TAG, "createJpegPages: total " + pages.size() + " JPEG pages created");
+        jsLog("createJpegPages: total " + pages.size() + " sheets created");
         return pages;
     }
 
@@ -598,12 +629,15 @@ public class MainActivity extends AppCompatActivity {
         int port = printerPort;
         Log.d(TAG, "=== sendIPP START === dataSize=" + imageData.length
             + " copies=" + copies + " host=" + host + ":" + port);
+        jsLog("=== sendIPP START === size=" + imageData.length + " host=" + host + ":" + port);
 
         // Log first few bytes to verify JPEG magic (FF D8 FF)
         if (imageData.length >= 3) {
-            Log.d(TAG, "sendIPP: data magic bytes: "
-                + String.format("%02x %02x %02x", imageData[0], imageData[1], imageData[2])
-                + (imageData[0] == (byte) 0xFF && imageData[1] == (byte) 0xD8 ? " (valid JPEG)" : " (NOT JPEG!)"));
+            String magic = String.format("%02x %02x %02x", imageData[0], imageData[1], imageData[2]);
+            boolean validJpeg = imageData[0] == (byte) 0xFF && imageData[1] == (byte) 0xD8;
+            Log.d(TAG, "sendIPP: data magic bytes: " + magic
+                + (validJpeg ? " (valid JPEG)" : " (NOT JPEG!)"));
+            jsLog("sendIPP: magic=" + magic + (validJpeg ? " (valid JPEG)" : " (NOT JPEG!)"));
         }
 
         // Build list of paths to try: NSD rp first, then common Brother paths
@@ -626,25 +660,30 @@ public class MainActivity extends AppCompatActivity {
             for (String path : pathsToTry) {
                 attempt++;
                 Log.d(TAG, "sendIPP: attempt #" + attempt + " path=" + path + " format=" + format);
+                jsLog("sendIPP: attempt #" + attempt + " path=" + path + " format=" + format);
                 try {
                     trySendIPP(host, port, path, imageData, copies, format);
                     Log.d(TAG, "=== sendIPP SUCCESS === path=" + path + " format=" + format);
+                    jsLog("=== sendIPP SUCCESS === path=" + path + " format=" + format);
                     // Remember working path for next time
                     printerResourcePath = path;
                     return;
                 } catch (Exception e) {
                     String msg = e.getMessage();
                     Log.w(TAG, "sendIPP: attempt #" + attempt + " FAILED: " + msg);
+                    jsLog("sendIPP: attempt #" + attempt + " FAILED: " + msg);
                     lastError = e;
                     // If format not supported (0x040a), skip to next format
                     if (msg != null && msg.contains("0x40a")) {
                         Log.d(TAG, "sendIPP: format " + format + " not supported, trying next format");
+                        jsLog("sendIPP: format " + format + " not supported, trying next");
                         break;
                     }
                 }
             }
         }
         Log.e(TAG, "=== sendIPP FAILED === all " + attempt + " attempts exhausted");
+        jsLog("=== sendIPP FAILED === all " + attempt + " attempts failed");
         throw lastError != null ? lastError : new Exception("All IPP attempts failed");
     }
 
@@ -653,6 +692,7 @@ public class MainActivity extends AppCompatActivity {
         String printerUri = "ipp://" + host + ":" + port + path;
         Log.d(TAG, "trySendIPP: uri=" + printerUri + " format=" + documentFormat
             + " dataSize=" + data.length + " copies=" + copies);
+        jsLog("trySendIPP: uri=" + printerUri + " format=" + documentFormat);
 
         URL url = new URL("http://" + host + ":" + port + path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -695,6 +735,7 @@ public class MainActivity extends AppCompatActivity {
 
         int httpCode = conn.getResponseCode();
         Log.d(TAG, "IPP HTTP code: " + httpCode + " for path: " + path);
+        jsLog("trySendIPP: HTTP " + httpCode + " for " + path);
 
         // Read IPP response body to check actual status
         InputStream respStream;
@@ -732,6 +773,8 @@ public class MainActivity extends AppCompatActivity {
         int ippStatusCode = ((resp[2] & 0xFF) << 8) | (resp[3] & 0xFF);
         Log.d(TAG, "IPP status code: 0x" + Integer.toHexString(ippStatusCode)
             + " (" + ippStatusCode + ")");
+        jsLog("trySendIPP: IPP status=0x" + Integer.toHexString(ippStatusCode)
+            + (ippStatusCode <= 0xFF ? " (OK)" : " (ERROR)"));
 
         // IPP successful statuses are 0x0000-0x00FF
         if (ippStatusCode > 0x00FF) {
