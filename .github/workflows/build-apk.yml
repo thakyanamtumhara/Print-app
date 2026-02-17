@@ -25,13 +25,14 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Generate Gradle wrapper
+      - name: Setup Gradle wrapper
         working-directory: android
         run: |
-          gradle wrapper --gradle-version 8.2
+          mkdir -p gradle/wrapper
+          curl -sL https://services.gradle.org/distributions/gradle-8.2-bin.zip -o /tmp/gradle.zip
+          unzip -qo /tmp/gradle.zip -d /tmp/gradle
+          /tmp/gradle/gradle-8.2/bin/gradle wrapper --gradle-version 8.2
+          chmod +x gradlew
 
       - name: Build Debug APK
         working-directory: android
