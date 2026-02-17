@@ -32,6 +32,7 @@ html, body {
 
 .preview-wrapper {
   position: relative;
+  transform-origin: 0 0;
 }
 
 .label-container {
@@ -200,6 +201,38 @@ html, body {
   font-size: 13px;
   color: #555;
   line-height: 1.3;
+}
+
+/* ── Eraser Thickness Bar ── */
+.thickness-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
+}
+
+.thick-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 2px solid #d1d1d6;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.thick-btn.active {
+  border-color: #007aff;
+  background: #eef4ff;
+}
+
+.thick-dot {
+  display: block;
+  border-radius: 50%;
+  background: #555;
 }
 
 /* ── Settings Section ── */

@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var printBtn = document.getElementById('printBtn');
   var layoutSelect = document.getElementById('layoutSelect');
   var labelContainer = document.getElementById('labelContainer');
+  var previewWrapper = document.getElementById('previewWrapper');
   var whiteoutCanvas = document.getElementById('whiteoutCanvas');
   var undoBtn = document.getElementById('undoBtn');
   var printArea = document.getElementById('printArea');
@@ -63,14 +64,40 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ══════════════════════════════════════════
+  // ── PINCH ZOOM (preview only) ──
+  // Two fingers on preview = zoom. One finger = draw white.
+  // ══════════════════════════════════════════
+  var zoom = 1;
+  var isPinching = false;
+  var pinchStartDist = 0;
+  var pinchStartZoom = 1;
+
+  function getPinchDist(touches) {
+    var dx = touches[0].clientX - touches[1].clientX;
+    var dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function applyZoom() {
+    previewWrapper.style.transform = 'scale(' + zoom + ')';
+    var extraW = previewWrapper.scrollWidth * (zoom - 1);
+    var extraH = previewWrapper.scrollHeight * (zoom - 1);
+    previewWrapper.style.marginRight = extraW + 'px';
+    previewWrapper.style.marginBottom = extraH + 'px';
+  }
+
+  // ══════════════════════════════════════════
   // ── WHITE-OUT CANVAS (always active) ──
-  // One finger = draw white. Two fingers = browser pinch zoom.
-  // Canvas has touch-action: pinch-zoom so browser handles pinch natively.
+  // One finger = draw white. Two fingers = pinch zoom.
+  // touch-action: none — we handle ALL touches in JS.
   // ══════════════════════════════════════════
   var strokes = [];
   var currentStroke = null;
-  var BRUSH = 14;
+  var BRUSH_SIZES = [6, 10, 18, 28];
+  var brushIndex = 1;
   var ctx = whiteoutCanvas.getContext('2d');
+
+  function getBrush() { return BRUSH_SIZES[brushIndex]; }
 
   function resizeCanvas() {
     var w = labelContainer.offsetWidth;
@@ -88,21 +115,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function paintStroke(pts) {
-    if (!pts.length) return;
+  function paintStroke(s) {
+    if (!s.pts.length) return;
+    var r = s.brush;
     ctx.fillStyle = '#FFFFFF';
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = BRUSH * 2;
+    ctx.lineWidth = r * 2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.arc(pts[0].x, pts[0].y, BRUSH, 0, Math.PI * 2);
+    ctx.arc(s.pts[0].x, s.pts[0].y, r, 0, Math.PI * 2);
     ctx.fill();
-    if (pts.length > 1) {
+    if (s.pts.length > 1) {
       ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (var i = 1; i < pts.length; i++) {
-        ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.moveTo(s.pts[0].x, s.pts[0].y);
+      for (var i = 1; i < s.pts.length; i++) {
+        ctx.lineTo(s.pts[i].x, s.pts[i].y);
       }
       ctx.stroke();
     }
@@ -119,27 +147,51 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawStart(e) {
-    // If 2+ fingers, let browser handle pinch zoom
-    if (e.touches && e.touches.length > 1) { currentStroke = null; return; }
     e.preventDefault();
+    // Two fingers → pinch zoom
+    if (e.touches && e.touches.length >= 2) {
+      isPinching = true;
+      currentStroke = null;
+      pinchStartDist = getPinchDist(e.touches);
+      pinchStartZoom = zoom;
+      return;
+    }
+    // Don't start drawing right after a pinch ends
+    if (isPinching) return;
+    // One finger → draw
     var p = pos(e);
-    currentStroke = [p];
+    currentStroke = { pts: [p], brush: getBrush() };
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.arc(p.x, p.y, BRUSH, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, getBrush(), 0, Math.PI * 2);
     ctx.fill();
   }
 
   function drawMove(e) {
-    // Cancel draw if second finger added (pinch starting)
-    if (e.touches && e.touches.length > 1) { currentStroke = null; return; }
-    if (!currentStroke) return;
     e.preventDefault();
+    // Pinch zoom
+    if (e.touches && e.touches.length >= 2 && isPinching) {
+      var dist = getPinchDist(e.touches);
+      zoom = Math.max(1, Math.min(5, pinchStartZoom * (dist / pinchStartDist)));
+      applyZoom();
+      currentStroke = null;
+      return;
+    }
+    // If second finger was just added, cancel drawing
+    if (e.touches && e.touches.length >= 2) {
+      isPinching = true;
+      currentStroke = null;
+      pinchStartDist = getPinchDist(e.touches);
+      pinchStartZoom = zoom;
+      return;
+    }
+    if (!currentStroke) return;
     var p = pos(e);
-    currentStroke.push(p);
-    var prev = currentStroke[currentStroke.length - 2];
+    currentStroke.pts.push(p);
+    var prev = currentStroke.pts[currentStroke.pts.length - 2];
+    var br = currentStroke.brush;
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = BRUSH * 2;
+    ctx.lineWidth = br * 2;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(prev.x, prev.y);
@@ -147,8 +199,12 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.stroke();
   }
 
-  function drawEnd() {
-    if (currentStroke && currentStroke.length > 0) {
+  function drawEnd(e) {
+    // If fingers still down, don't finalize
+    if (e.touches && e.touches.length >= 2) return;
+    if (e.touches && e.touches.length === 1 && isPinching) return;
+    if (e.touches && e.touches.length === 0) isPinching = false;
+    if (currentStroke && currentStroke.pts.length > 0) {
       strokes.push(currentStroke);
       updateUndoBtn();
     }
@@ -158,13 +214,33 @@ document.addEventListener('DOMContentLoaded', () => {
   // Touch
   whiteoutCanvas.addEventListener('touchstart', drawStart, { passive: false });
   whiteoutCanvas.addEventListener('touchmove', drawMove, { passive: false });
-  whiteoutCanvas.addEventListener('touchend', drawEnd);
+  whiteoutCanvas.addEventListener('touchend', drawEnd, { passive: false });
   whiteoutCanvas.addEventListener('touchcancel', drawEnd);
   // Mouse (desktop)
   whiteoutCanvas.addEventListener('mousedown', drawStart);
   whiteoutCanvas.addEventListener('mousemove', drawMove);
   whiteoutCanvas.addEventListener('mouseup', drawEnd);
   whiteoutCanvas.addEventListener('mouseleave', drawEnd);
+
+  // ── Brush thickness selector ──
+  var thicknessBar = document.getElementById('thicknessBar');
+  var thicknessBtns = thicknessBar.querySelectorAll('.thick-btn');
+
+  function updateThicknessUI() {
+    for (var i = 0; i < thicknessBtns.length; i++) {
+      thicknessBtns[i].classList.toggle('active', i === brushIndex);
+    }
+  }
+
+  for (var ti = 0; ti < thicknessBtns.length; ti++) {
+    (function(idx) {
+      thicknessBtns[idx].addEventListener('click', function() {
+        brushIndex = idx;
+        updateThicknessUI();
+      });
+    })(ti);
+  }
+  updateThicknessUI();
 
   // Floating undo button
   function updateUndoBtn() {

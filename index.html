@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>iPrint&Scan</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="manifest" href="manifest.json">
@@ -51,12 +51,20 @@
             </div>
           </div>
         </div>
-        <canvas id="whiteoutCanvas" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;border-radius:6px;touch-action:pinch-zoom;cursor:crosshair"></canvas>
+        <canvas id="whiteoutCanvas" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;border-radius:6px;touch-action:none;cursor:crosshair"></canvas>
       </div>
     </main>
 
     <!-- Floating Undo button (appears after drawing) -->
     <button id="undoBtn" style="display:none;position:fixed;bottom:220px;right:16px;width:44px;height:44px;border-radius:50%;background:#fff;border:1px solid #ddd;box-shadow:0 2px 8px rgba(0,0,0,0.15);align-items:center;justify-content:center;font-size:18px;cursor:pointer;z-index:20">&#8617;</button>
+
+    <!-- Eraser thickness: 1 2 3 4 -->
+    <div class="thickness-bar" id="thicknessBar">
+      <button class="thick-btn" data-size="0"><span class="thick-dot" style="width:6px;height:6px"></span></button>
+      <button class="thick-btn active" data-size="1"><span class="thick-dot" style="width:10px;height:10px"></span></button>
+      <button class="thick-btn" data-size="2"><span class="thick-dot" style="width:16px;height:16px"></span></button>
+      <button class="thick-btn" data-size="3"><span class="thick-dot" style="width:22px;height:22px"></span></button>
+    </div>
 
     <!-- Printer Info Bar -->
     <div class="printer-bar">
