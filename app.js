@@ -70,6 +70,59 @@ document.addEventListener('DOMContentLoaded', () => {
     if (copies < 99) { copies++; updateCopiesUI(); }
   });
 
+  // ── Layout change → update in-app preview ──
+  layoutSelect.addEventListener('change', function() {
+    updatePreviewLayout();
+  });
+
+  function updatePreviewLayout() {
+    if (contentType !== 'pdf' || pageImages.length === 0) return;
+    var layout = parseInt(layoutSelect.value, 10);
+    labelContainer.innerHTML = '';
+
+    if (layout === 1) {
+      // 1 per sheet: show pages vertically (normal scroll)
+      var container = document.createElement('div');
+      container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px';
+      for (var i = 0; i < pageImages.length; i++) {
+        var img = document.createElement('img');
+        img.src = pageImages[i];
+        img.style.cssText = 'width:100%;display:block;border-radius:4px;background:#fff';
+        container.appendChild(img);
+      }
+      labelContainer.appendChild(container);
+    } else {
+      // 2/3/4 per sheet: show pages grouped into sheet previews
+      var container = document.createElement('div');
+      container.className = 'preview-sheets';
+
+      var totalSheets = Math.ceil(pageImages.length / layout);
+      for (var i = 0; i < pageImages.length; i += layout) {
+        var sheet = document.createElement('div');
+        sheet.className = 'preview-sheet preview-layout-' + layout;
+
+        for (var j = 0; j < layout && (i + j) < pageImages.length; j++) {
+          var tile = document.createElement('div');
+          tile.className = 'preview-tile';
+          var img = document.createElement('img');
+          img.src = pageImages[i + j];
+          tile.appendChild(img);
+          sheet.appendChild(tile);
+        }
+        container.appendChild(sheet);
+
+        if (totalSheets > 1) {
+          var lbl = document.createElement('div');
+          lbl.className = 'preview-sheet-label';
+          lbl.textContent = 'Page ' + (Math.floor(i / layout) + 1) + ' of ' + totalSheets;
+          container.appendChild(lbl);
+        }
+      }
+      labelContainer.appendChild(container);
+    }
+    resizeCanvas();
+  }
+
   // ══════════════════════════════════════════
   // ── PINCH ZOOM (preview only) ──
   // Two fingers on preview = zoom. One finger = draw white.
