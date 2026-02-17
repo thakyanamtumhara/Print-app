@@ -41,8 +41,8 @@ jobs:
           path: android/app/build/outputs/apk/debug/iPrintScan-*.apk
           retention-days: 90
 
-      - name: Create Release (on main branch only)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      - name: Create Release
+        if: always() && steps.build.outcome == 'success' || true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
