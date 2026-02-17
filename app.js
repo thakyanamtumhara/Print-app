@@ -302,6 +302,49 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUndoBtn();
   }
 
+  function renderPdfPages(pdfData) {
+    labelContainer.innerHTML = '';
+    var container = document.createElement('div');
+    container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px';
+    labelContainer.appendChild(container);
+
+    pdfjsLib.getDocument(pdfData).promise.then(function(pdf) {
+      function renderPage(num) {
+        if (num > pdf.numPages) { resizeCanvas(); return; }
+        pdf.getPage(num).then(function(page) {
+          var containerWidth = labelContainer.offsetWidth - 16;
+          var vp = page.getViewport({ scale: 1 });
+          var scale = containerWidth / vp.width;
+          var scaled = page.getViewport({ scale: scale });
+
+          var canvas = document.createElement('canvas');
+          canvas.width = scaled.width;
+          canvas.height = scaled.height;
+          canvas.style.cssText = 'width:100%;display:block;border-radius:4px;background:#fff';
+          container.appendChild(canvas);
+
+          page.render({ canvasContext: canvas.getContext('2d'), viewport: scaled }).promise.then(function() {
+            renderPage(num + 1);
+          });
+        });
+      }
+      renderPage(1);
+    }).catch(function(err) {
+      labelContainer.innerHTML =
+        '<div style="padding:32px 16px;text-align:center;color:#c00">' +
+        '<div style="font-size:15px;font-weight:600">Could not load PDF</div>' +
+        '<div style="font-size:13px;margin-top:4px;color:#888">' + (err.message || err) + '</div>' +
+        '</div>';
+    });
+  }
+
+  function base64ToUint8Array(b64) {
+    var raw = atob(b64);
+    var arr = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }
+
   function displayFile(file) {
     clearWhiteout();
     if (file.type.startsWith('image/')) {
@@ -311,11 +354,11 @@ document.addEventListener('DOMContentLoaded', () => {
         '<img src="' + url + '" style="max-width:100%;max-height:70vh;border-radius:4px;object-fit:contain">' +
         '</div>';
     } else if (file.type === 'application/pdf') {
-      var url2 = URL.createObjectURL(file);
-      labelContainer.innerHTML =
-        '<div style="padding:0;display:flex;justify-content:center">' +
-        '<embed src="' + url2 + '" type="application/pdf" style="width:100%;height:60vh;border:none;border-radius:4px">' +
-        '</div>';
+      var reader = new FileReader();
+      reader.onload = function() {
+        renderPdfPages({ data: new Uint8Array(reader.result) });
+      };
+      reader.readAsArrayBuffer(file);
     } else {
       labelContainer.innerHTML =
         '<div style="padding:32px 16px;text-align:center;color:#555">' +
@@ -327,17 +370,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function displayFileFromBase64(name, mimeType, base64Data) {
     clearWhiteout();
-    var dataUrl = 'data:' + mimeType + ';base64,' + base64Data;
     if (mimeType.startsWith('image/')) {
+      var dataUrl = 'data:' + mimeType + ';base64,' + base64Data;
       labelContainer.innerHTML =
         '<div style="padding:12px;text-align:center">' +
         '<img src="' + dataUrl + '" style="max-width:100%;max-height:70vh;border-radius:4px;object-fit:contain">' +
         '</div>';
     } else if (mimeType === 'application/pdf') {
-      labelContainer.innerHTML =
-        '<div style="padding:0;display:flex;justify-content:center">' +
-        '<embed src="' + dataUrl + '" type="application/pdf" style="width:100%;height:60vh;border:none;border-radius:4px">' +
-        '</div>';
+      renderPdfPages({ data: base64ToUint8Array(base64Data) });
     } else {
       labelContainer.innerHTML =
         '<div style="padding:32px 16px;text-align:center;color:#555">' +
