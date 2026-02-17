@@ -29,6 +29,10 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+
 import org.json.JSONArray;
 
 import java.io.ByteArrayOutputStream;
@@ -36,6 +40,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
@@ -469,6 +475,63 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ══════════════════════════════════════════
+    // ── WiFi Network Binding ──
+    // On modern Android, when mobile data is on, local IP connections
+    // may route through cellular and time out. We find the WiFi Network
+    // and use it to open connections so they go through the right interface.
+    // ══════════════════════════════════════════
+    private Network getWifiNetwork() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return null;
+            for (Network network : cm.getAllNetworks()) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    return network;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "getWifiNetwork failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    // Open an HttpURLConnection bound to WiFi network (falls back to default if WiFi not found)
+    private HttpURLConnection openWifiConnection(URL url) throws Exception {
+        Network wifi = getWifiNetwork();
+        if (wifi != null) {
+            jsLog("Using WiFi-bound connection");
+            return (HttpURLConnection) wifi.openConnection(url);
+        } else {
+            jsLog("WARNING: No WiFi network found, using default connection");
+            return (HttpURLConnection) url.openConnection();
+        }
+    }
+
+    // Test TCP connectivity to the printer on various ports (diagnostic)
+    private void diagnosePrinterConnectivity(String host) {
+        int[] ports = {631, 9100, 80, 443};
+        for (int port : ports) {
+            new Thread(() -> {
+                try {
+                    Socket sock = new Socket();
+                    Network wifi = getWifiNetwork();
+                    if (wifi != null) {
+                        wifi.bindSocket(sock);
+                    }
+                    sock.connect(new InetSocketAddress(host, port), 3000);
+                    sock.close();
+                    jsLog("DIAG: port " + port + " OPEN on " + host);
+                    Log.d(TAG, "DIAG: port " + port + " OPEN on " + host);
+                } catch (Exception e) {
+                    jsLog("DIAG: port " + port + " CLOSED/TIMEOUT on " + host + " (" + e.getMessage() + ")");
+                    Log.d(TAG, "DIAG: port " + port + " CLOSED on " + host + ": " + e.getMessage());
+                }
+            }).start();
+        }
+    }
+
+    // ══════════════════════════════════════════
     // ── DIRECT IPP PRINTING ──
     // ══════════════════════════════════════════
     private void printDirectIPP(String pagesJson, int layout, int copies) {
@@ -488,6 +551,9 @@ public class MainActivity extends AppCompatActivity {
             });
             return;
         }
+
+        // Run connectivity diagnostic in parallel
+        diagnosePrinterConnectivity(printerHost);
 
         new Thread(() -> {
             try {
@@ -682,9 +748,60 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }
-        Log.e(TAG, "=== sendIPP FAILED === all " + attempt + " attempts exhausted");
-        jsLog("=== sendIPP FAILED === all " + attempt + " attempts failed");
-        throw lastError != null ? lastError : new Exception("All IPP attempts failed");
+        Log.e(TAG, "=== sendIPP (port " + port + ") FAILED === all " + attempt + " attempts exhausted");
+        jsLog("=== sendIPP (port " + port + ") FAILED, trying port 9100 raw ===");
+
+        // Fallback: try port 9100 (raw/JetDirect) with PJL-wrapped JPEG
+        try {
+            trySendRaw9100(host, imageData);
+            Log.d(TAG, "=== sendRaw9100 SUCCESS ===");
+            jsLog("=== sendRaw9100 SUCCESS ===");
+            return;
+        } catch (Exception e9100) {
+            Log.e(TAG, "sendRaw9100 also FAILED: " + e9100.getMessage());
+            jsLog("sendRaw9100 also FAILED: " + e9100.getMessage());
+        }
+
+        throw lastError != null ? lastError : new Exception("All print attempts failed (IPP + raw)");
+    }
+
+    // Fallback: send JPEG to printer via raw socket on port 9100 (JetDirect/AppSocket)
+    // Wraps JPEG in PJL so Brother printer treats it as a print job
+    private void trySendRaw9100(String host, byte[] jpegData) throws Exception {
+        jsLog("trySendRaw9100: connecting to " + host + ":9100...");
+        Socket sock = new Socket();
+        Network wifi = getWifiNetwork();
+        if (wifi != null) {
+            wifi.bindSocket(sock);
+        }
+        sock.connect(new InetSocketAddress(host, 9100), 10000);
+        sock.setSoTimeout(30000);
+        jsLog("trySendRaw9100: connected! Sending " + jpegData.length + " bytes...");
+
+        OutputStream out = sock.getOutputStream();
+        // PJL header to enter JPEG direct print mode
+        String pjlHeader = "\u001B%-12345X@PJL\r\n@PJL ENTER LANGUAGE = POSTSCRIPT\r\n";
+        // PostScript wrapper that decodes JPEG inline
+        String psHeader = "%!PS\r\n"
+            + "<< /PageSize [595 842] >> setpagedevice\r\n"  // A4
+            + "/DeviceRGB setcolorspace\r\n"
+            + "0 0 595 842 rectclip\r\n"
+            + "595 842 scale\r\n"
+            + "595 842 8 [595 0 0 -842 0 842]\r\n"
+            + "currentfile /DCTDecode filter\r\n"
+            + "false 3 colorimage\r\n";
+        String psFooter = "\r\nshowpage\r\n";
+        String pjlFooter = "\u001B%-12345X";
+
+        out.write(pjlHeader.getBytes("ASCII"));
+        out.write(psHeader.getBytes("ASCII"));
+        out.write(jpegData);
+        out.write(psFooter.getBytes("ASCII"));
+        out.write(pjlFooter.getBytes("ASCII"));
+        out.flush();
+        out.close();
+        sock.close();
+        jsLog("trySendRaw9100: done, data sent");
     }
 
     private void trySendIPP(String host, int port, String path,
@@ -695,7 +812,7 @@ public class MainActivity extends AppCompatActivity {
         jsLog("trySendIPP: uri=" + printerUri + " format=" + documentFormat);
 
         URL url = new URL("http://" + host + ":" + port + path);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        HttpURLConnection conn = openWifiConnection(url);
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/ipp");
         conn.setDoOutput(true);
