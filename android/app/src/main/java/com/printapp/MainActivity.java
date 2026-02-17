@@ -628,35 +628,7 @@ public class MainActivity extends AppCompatActivity {
 
                 Exception lastError = null;
 
-                // Strategy 1: Send PDF directly via port 9100 with PJL
-                if (port9100Open) {
-                    try {
-                        trySendRaw9100_pdf(host, pdfBytes);
-                        jsLog("=== printOriginalPdf SUCCESS via port 9100 (PJL) ===");
-                        runOnUiThread(() ->
-                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
-                        return;
-                    } catch (Exception e) {
-                        jsLog("printOriginalPdf: port 9100 PJL FAILED: " + e.getMessage());
-                        lastError = e;
-                    }
-
-                    Thread.sleep(1000);
-
-                    // Strategy 1B: Raw PDF without PJL
-                    try {
-                        trySendRaw9100_pdfNoPjl(host, pdfBytes);
-                        jsLog("=== printOriginalPdf SUCCESS via port 9100 (raw) ===");
-                        runOnUiThread(() ->
-                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
-                        return;
-                    } catch (Exception e) {
-                        jsLog("printOriginalPdf: port 9100 raw FAILED: " + e.getMessage());
-                        lastError = e;
-                    }
-                }
-
-                // Strategy 2: Send PDF via IPP on port 631
+                // Strategy 1: Send PDF via IPP on port 631 (most reliable for PDF)
                 if (port631Open) {
                     String ippPath = "/ipp/print";
                     if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
@@ -671,6 +643,34 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     } catch (Exception e) {
                         jsLog("printOriginalPdf: IPP 631 FAILED: " + e.getMessage());
+                        lastError = e;
+                    }
+                }
+
+                // Strategy 2: Send PDF directly via port 9100 with PJL ENTER LANGUAGE = PDF
+                if (port9100Open) {
+                    try {
+                        trySendRaw9100_pdf(host, pdfBytes);
+                        jsLog("=== printOriginalPdf SUCCESS via port 9100 (PJL) ===");
+                        runOnUiThread(() ->
+                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                        return;
+                    } catch (Exception e) {
+                        jsLog("printOriginalPdf: port 9100 PJL FAILED: " + e.getMessage());
+                        lastError = e;
+                    }
+
+                    Thread.sleep(1000);
+
+                    // Strategy 2B: Raw PDF without PJL
+                    try {
+                        trySendRaw9100_pdfNoPjl(host, pdfBytes);
+                        jsLog("=== printOriginalPdf SUCCESS via port 9100 (raw) ===");
+                        runOnUiThread(() ->
+                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                        return;
+                    } catch (Exception e) {
+                        jsLog("printOriginalPdf: port 9100 raw FAILED: " + e.getMessage());
                         lastError = e;
                     }
                 }
@@ -1019,11 +1019,11 @@ public class MainActivity extends AppCompatActivity {
 
         OutputStream out = sock.getOutputStream();
 
-        // PJL header — NO "ENTER LANGUAGE" so printer auto-detects PDF from %PDF- magic
+        // PJL header — ENTER LANGUAGE = PDF tells printer to interpret data as PDF
         String pjlHeader = "\u001B%-12345X@PJL\r\n"
             + "@PJL SET PAPER = A4\r\n"
             + "@PJL JOB NAME = \"iPrintScan\"\r\n"
-            + "\r\n";  // empty line = end of PJL, start of data
+            + "@PJL ENTER LANGUAGE = PDF\r\n";
 
         String pjlFooter = "\u001B%-12345X@PJL EOJ\r\n\u001B%-12345X";
 
