@@ -37,10 +37,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // ── Print button: uses Android native print or browser print ──
   printBtn.addEventListener('click', () => {
-    const layout = layoutSelect.value;
-    const fileInfo = loadedFileName ? ` — File: ${loadedFileName}` : '';
-    alert(`Printing ${copies} copy(ies) with ${layout} label(s) per sheet.${fileInfo}`);
+    if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
+      // Running inside the Android app → open system print dialog
+      // (shows all WiFi printers including Brother)
+      window.AndroidBridge.print(copies);
+    } else {
+      // Running in a regular browser → use browser print
+      window.print();
+    }
   });
 
   // ── Handle files opened via "Open with" / File Handling API ──

@@ -2,8 +2,17 @@ package com.printapp;
 
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.CancellationSignal;
+import android.os.ParcelFileDescriptor;
+import android.print.PageRange;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintDocumentInfo;
+import android.print.PrintManager;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
@@ -15,11 +24,16 @@ import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
+    private Uri currentFileUri;
+    private String currentFileName;
+    private String currentMimeType;
     private static final String PWA_URL = "https://thakyanamtumhara.github.io/Print-app/";
 
     @Override
@@ -68,26 +82,31 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (fileUri != null) {
+            currentFileUri = fileUri;
+            currentMimeType = getContentResolver().getType(fileUri);
+            currentFileName = getFileName(fileUri);
             loadFileIntoWebView(fileUri);
         }
     }
 
+    private String getFileName(Uri uri) {
+        String name = "label";
+        Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+        if (cursor != null && cursor.moveToFirst()) {
+            int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+            if (nameIndex >= 0) {
+                name = cursor.getString(nameIndex);
+            }
+            cursor.close();
+        }
+        return name;
+    }
+
     private void loadFileIntoWebView(Uri uri) {
         try {
-            // Get file name
-            String fileName = "label";
             String mimeType = getContentResolver().getType(uri);
+            String fileName = getFileName(uri);
 
-            Cursor cursor = getContentResolver().query(uri, null, null, null, null);
-            if (cursor != null && cursor.moveToFirst()) {
-                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                if (nameIndex >= 0) {
-                    fileName = cursor.getString(nameIndex);
-                }
-                cursor.close();
-            }
-
-            // Read file as base64
             InputStream inputStream = getContentResolver().openInputStream(uri);
             if (inputStream == null) return;
 
@@ -101,17 +120,15 @@ public class MainActivity extends AppCompatActivity {
 
             String base64Data = Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP);
 
-            // Pass file to web app via JavaScript
             final String jsFileName = fileName.replace("'", "\\'");
             final String jsMimeType = mimeType != null ? mimeType : "application/octet-stream";
-            final String jsBase64 = base64Data;
 
             webView.post(() -> {
                 String js = "javascript:(function() {" +
                     "if (window.handleNativeFile) {" +
-                    "  window.handleNativeFile('" + jsFileName + "', '" + jsMimeType + "', '" + jsBase64 + "');" +
+                    "  window.handleNativeFile('" + jsFileName + "', '" + jsMimeType + "', '" + base64Data + "');" +
                     "} else {" +
-                    "  window._pendingFile = {name:'" + jsFileName + "', type:'" + jsMimeType + "', data:'" + jsBase64 + "'};" +
+                    "  window._pendingFile = {name:'" + jsFileName + "', type:'" + jsMimeType + "', data:'" + base64Data + "'};" +
                     "}" +
                     "})()";
                 webView.evaluateJavascript(js, null);
@@ -119,6 +136,77 @@ public class MainActivity extends AppCompatActivity {
 
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    // ── Print using Android Print Framework ──
+    // This discovers WiFi printers (Brother, HP, etc.) automatically
+    private void printCurrentFile(int copies) {
+        PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
+        if (printManager == null) return;
+
+        String jobName = "iPrint&Scan - " + (currentFileName != null ? currentFileName : "Label");
+
+        if (currentFileUri != null && "application/pdf".equals(currentMimeType)) {
+            // Print PDF directly
+            printManager.print(jobName, new PdfPrintAdapter(), null);
+        } else {
+            // Print WebView content (label preview or image)
+            PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
+            printManager.print(jobName, adapter, null);
+        }
+    }
+
+    // Adapter to print PDF files directly
+    private class PdfPrintAdapter extends PrintDocumentAdapter {
+        @Override
+        public void onLayout(PrintAttributes oldAttributes, PrintAttributes newAttributes,
+                           CancellationSignal cancellationSignal,
+                           LayoutResultCallback callback, Bundle extras) {
+
+            if (cancellationSignal.isCanceled()) {
+                callback.onLayoutCancelled();
+                return;
+            }
+
+            PrintDocumentInfo info = new PrintDocumentInfo.Builder(currentFileName != null ? currentFileName : "label.pdf")
+                .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                .build();
+
+            callback.onLayoutFinished(info, true);
+        }
+
+        @Override
+        public void onWrite(PageRange[] pages, ParcelFileDescriptor destination,
+                          CancellationSignal cancellationSignal,
+                          WriteResultCallback callback) {
+            try {
+                InputStream input = getContentResolver().openInputStream(currentFileUri);
+                if (input == null) {
+                    callback.onWriteFailed("Cannot read file");
+                    return;
+                }
+
+                OutputStream output = new FileOutputStream(destination.getFileDescriptor());
+                byte[] buf = new byte[4096];
+                int bytesRead;
+                while ((bytesRead = input.read(buf)) != -1) {
+                    if (cancellationSignal.isCanceled()) {
+                        callback.onWriteCancelled();
+                        input.close();
+                        output.close();
+                        return;
+                    }
+                    output.write(buf, 0, bytesRead);
+                }
+
+                input.close();
+                output.close();
+                callback.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});
+
+            } catch (Exception e) {
+                callback.onWriteFailed(e.getMessage());
+            }
         }
     }
 
@@ -131,11 +219,17 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // JS interface for the web app to call native features
+    // ── JS Bridge: web app calls these methods ──
     public class WebAppInterface {
+
         @JavascriptInterface
-        public void print() {
-            // Could trigger native print dialog in the future
+        public void print(int copies) {
+            runOnUiThread(() -> printCurrentFile(copies));
+        }
+
+        @JavascriptInterface
+        public boolean isAndroid() {
+            return true;
         }
     }
 }
