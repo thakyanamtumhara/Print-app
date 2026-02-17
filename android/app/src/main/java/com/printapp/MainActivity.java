@@ -11,12 +11,8 @@ import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.CancellationSignal;
-import android.os.ParcelFileDescriptor;
-import android.print.PageRange;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
-import android.print.PrintDocumentInfo;
 import android.print.PrintManager;
 import android.provider.OpenableColumns;
 import android.util.Base64;
@@ -36,8 +32,6 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import org.json.JSONArray;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -646,97 +640,86 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ── Direct IPP for labels (WebView → PDF → IPP) ──
+    // ── Direct IPP for labels (WebView → PdfDocument → IPP) ──
     private void printLabelDirectIPP(int copies) {
         if (printerHost == null) {
             printViaSystemDialog(copies);
             return;
         }
 
-        try {
-            String jobName = "iPrint&Scan - " + (currentFileName != null ? currentFileName : "Label");
-            PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
-            File tempFile = File.createTempFile("print_", ".pdf", getCacheDir());
+        // Switch WebView to print view (hide app UI, show printArea)
+        webView.evaluateJavascript(
+            "(function(){" +
+            "  document.querySelector('.app').style.display='none';" +
+            "  var pa=document.getElementById('printArea');" +
+            "  pa.style.display='block';" +
+            "  pa.style.position='relative';" +
+            "  pa.style.background='#fff';" +
+            "  return 'ok';" +
+            "})()",
+            value -> {
+                // Wait for WebView to re-render with print content
+                webView.postDelayed(() -> {
+                    try {
+                        // Create PDF from WebView content using PdfDocument
+                        PdfDocument doc = new PdfDocument();
+                        int pdfWidth = 595;  // A4 at 72 DPI
+                        int pdfHeight = 842;
+                        PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
+                            pdfWidth, pdfHeight, 1).create();
+                        PdfDocument.Page page = doc.startPage(pageInfo);
 
-            PrintAttributes attrs = new PrintAttributes.Builder()
-                .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                .setResolution(new PrintAttributes.Resolution("default", "default", 300, 300))
-                .setColorMode(PrintAttributes.COLOR_MODE_MONOCHROME)
-                .build();
+                        Canvas canvas = page.getCanvas();
+                        float scale = (float) pdfWidth / webView.getWidth();
+                        canvas.scale(scale, scale);
+                        webView.draw(canvas);
 
-            adapter.onStart();
-            adapter.onLayout(null, attrs, new CancellationSignal(),
-                new PrintDocumentAdapter.LayoutResultCallback() {
-                    @Override
-                    public void onLayoutFinished(PrintDocumentInfo info, boolean changed) {
-                        try {
-                            ParcelFileDescriptor pfd = ParcelFileDescriptor.open(tempFile,
-                                ParcelFileDescriptor.MODE_READ_WRITE
-                                    | ParcelFileDescriptor.MODE_CREATE
-                                    | ParcelFileDescriptor.MODE_TRUNCATE);
+                        doc.finishPage(page);
 
-                            adapter.onWrite(new PageRange[]{PageRange.ALL_PAGES}, pfd,
-                                new CancellationSignal(),
-                                new PrintDocumentAdapter.WriteResultCallback() {
-                                    @Override
-                                    public void onWriteFinished(PageRange[] pages) {
-                                        new Thread(() -> {
-                                            try {
-                                                byte[] pdfData = readFileBytes(tempFile);
-                                                sendIPP(pdfData, copies);
-                                                runOnUiThread(() ->
-                                                    Toast.makeText(MainActivity.this, "Sent to printer", Toast.LENGTH_SHORT).show());
-                                            } catch (Exception e) {
-                                                Log.e(TAG, "Label IPP failed", e);
-                                                runOnUiThread(() -> {
-                                                    Toast.makeText(MainActivity.this, "Direct print failed, using dialog", Toast.LENGTH_SHORT).show();
-                                                    printViaSystemDialog(copies);
-                                                });
-                                            } finally {
-                                                tempFile.delete();
-                                                adapter.onFinish();
-                                            }
-                                        }).start();
-                                    }
+                        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                        doc.writeTo(bos);
+                        doc.close();
+                        byte[] pdfData = bos.toByteArray();
 
-                                    @Override
-                                    public void onWriteFailed(CharSequence error) {
-                                        Log.e(TAG, "Write failed: " + error);
-                                        tempFile.delete();
-                                        adapter.onFinish();
-                                        runOnUiThread(() -> printViaSystemDialog(copies));
-                                    }
+                        // Restore UI
+                        restoreWebViewUI();
+
+                        // Send PDF to printer on background thread
+                        new Thread(() -> {
+                            try {
+                                sendIPP(pdfData, copies);
+                                runOnUiThread(() ->
+                                    Toast.makeText(MainActivity.this,
+                                        "Sent to printer", Toast.LENGTH_SHORT).show());
+                            } catch (Exception e) {
+                                Log.e(TAG, "Label IPP failed", e);
+                                runOnUiThread(() -> {
+                                    Toast.makeText(MainActivity.this,
+                                        "Direct print failed, using dialog",
+                                        Toast.LENGTH_SHORT).show();
+                                    printViaSystemDialog(copies);
                                 });
-                        } catch (Exception e) {
-                            Log.e(TAG, "Failed to open temp file", e);
-                            tempFile.delete();
-                            adapter.onFinish();
-                            runOnUiThread(() -> printViaSystemDialog(copies));
-                        }
+                            }
+                        }).start();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Label direct print failed", e);
+                        restoreWebViewUI();
+                        printViaSystemDialog(copies);
                     }
-
-                    @Override
-                    public void onLayoutFailed(CharSequence error) {
-                        Log.e(TAG, "Layout failed: " + error);
-                        tempFile.delete();
-                        adapter.onFinish();
-                        runOnUiThread(() -> printViaSystemDialog(copies));
-                    }
-                }, null);
-        } catch (Exception e) {
-            Log.e(TAG, "Label direct print setup failed", e);
-            printViaSystemDialog(copies);
-        }
+                }, 300);
+            });
     }
 
-    private byte[] readFileBytes(File file) throws Exception {
-        FileInputStream fis = new FileInputStream(file);
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
-        int len;
-        while ((len = fis.read(buf)) != -1) bos.write(buf, 0, len);
-        fis.close();
-        return bos.toByteArray();
+    private void restoreWebViewUI() {
+        webView.evaluateJavascript(
+            "(function(){" +
+            "  document.querySelector('.app').style.display='';" +
+            "  var pa=document.getElementById('printArea');" +
+            "  pa.style.display='';" +
+            "  pa.style.position='';" +
+            "  pa.style.background='';" +
+            "})()",
+            null);
     }
 
     // ── JS Bridge ──
