@@ -19,30 +19,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
   var copies = 1;
 
-  // ── Printer status: green blink = connected, red blink = disconnected ──
-  function updatePrinterStatus(connected) {
-    if (connected) {
+  // ── Printer status ──
+  // Android app: green/red blink based on actual WiFi detection
+  // Web browser: neutral gray (browser print dialog picks printer)
+  function updatePrinterStatus(status) {
+    // status: 'connected' | 'disconnected' | 'neutral'
+    printerDot.classList.remove('connected', 'neutral');
+    if (status === 'connected') {
       printerDot.classList.add('connected');
       printerText.textContent = 'Brother HL-B2080DW';
-    } else {
-      printerDot.classList.remove('connected');
+    } else if (status === 'disconnected') {
       printerText.textContent = 'Printer not found';
+    } else {
+      printerDot.classList.add('neutral');
+      printerText.textContent = 'Prints via system dialog';
     }
   }
 
   function checkPrinter() {
     if (window.AndroidBridge && typeof window.AndroidBridge.isPrinterConnected === 'function') {
-      // Android app can actually detect the printer on the network
-      updatePrinterStatus(window.AndroidBridge.isPrinterConnected());
+      updatePrinterStatus(window.AndroidBridge.isPrinterConnected() ? 'connected' : 'disconnected');
     } else {
-      // Web browser cannot detect a printer — default to disconnected (red)
-      updatePrinterStatus(false);
+      updatePrinterStatus('neutral');
     }
   }
 
-  // Android bridge can call this to push status updates
   window.updatePrinterConnected = function(connected) {
-    updatePrinterStatus(connected);
+    updatePrinterStatus(connected ? 'connected' : 'disconnected');
   };
 
   // Poll every 5s (only useful when Android bridge is present)
