@@ -383,7 +383,14 @@ document.addEventListener('DOMContentLoaded', () => {
   printBtn.addEventListener('click', function() {
     buildPrintArea();
     if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
-      window.AndroidBridge.print(copies);
+      if ((contentType === 'pdf' || contentType === 'image') && pageImages.length > 0) {
+        // Direct IPP print — no system dialog
+        var layout = parseInt(layoutSelect.value, 10);
+        window.AndroidBridge.printDirect(JSON.stringify(pageImages), layout, copies);
+      } else {
+        // Label/HTML — fallback to system dialog
+        window.AndroidBridge.print(copies);
+      }
     } else {
       window.print();
     }
