@@ -421,10 +421,12 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Fallback print also failed: ' + e2.message);
       }
     } finally {
+      // Block re-prints for 5 seconds to prevent duplicate jobs
+      // (IPP printing is async and takes time to reach the printer)
       setTimeout(function() {
         isPrinting = false;
         printBtn.disabled = false;
-      }, 1500);
+      }, 5000);
     }
   });
 
