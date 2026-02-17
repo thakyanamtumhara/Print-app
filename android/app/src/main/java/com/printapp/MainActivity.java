@@ -71,6 +71,9 @@ public class MainActivity extends AppCompatActivity {
     private volatile int printerPort = 631;
     private volatile String printerResourcePath = null; // from NSD TXT "rp"
 
+    // ── Original PDF bytes for direct printing (skip rasterization) ──
+    private volatile byte[] originalPdfBytes = null;
+
     // ── Pending file (read immediately, inject after page load) ──
     private boolean pageLoaded = false;
 
@@ -486,8 +489,17 @@ public class MainActivity extends AppCompatActivity {
             }
             inputStream.close();
 
-            String base64Data = Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP);
+            byte[] rawBytes = buffer.toByteArray();
+            String base64Data = Base64.encodeToString(rawBytes, Base64.NO_WRAP);
             String safeMimeType = mimeType != null ? mimeType : "application/octet-stream";
+
+            // Store original bytes for direct printing (no rasterization needed)
+            if ("application/pdf".equals(safeMimeType)) {
+                originalPdfBytes = rawBytes;
+                Log.d(TAG, "readFileToBase64: stored " + rawBytes.length + " original PDF bytes");
+            } else {
+                originalPdfBytes = null;
+            }
 
             return new String[]{ fileName, safeMimeType, base64Data };
         } catch (Exception e) {
@@ -574,6 +586,106 @@ public class MainActivity extends AppCompatActivity {
                 }
             }).start();
         }
+    }
+
+    // ══════════════════════════════════════════
+    // ── DIRECT PDF PRINTING (send original PDF bytes, no rasterization) ──
+    // ══════════════════════════════════════════
+    private void printOriginalPdf(int copies) {
+        byte[] pdfBytes = originalPdfBytes;
+        if (pdfBytes == null) {
+            jsLog("printOriginalPdf: no original PDF bytes available!");
+            return;
+        }
+        if (printerHost == null) {
+            jsLog("printOriginalPdf: printerHost is NULL → system dialog fallback");
+            runOnUiThread(() -> {
+                Toast.makeText(this, "Printer not ready, using system dialog", Toast.LENGTH_SHORT).show();
+                printViaSystemDialog(copies);
+            });
+            return;
+        }
+
+        jsLog("=== printOriginalPdf START === pdfSize=" + pdfBytes.length
+            + " host=" + printerHost + ":" + printerPort);
+
+        new Thread(() -> {
+            try {
+                String host = printerHost;
+
+                // Probe ports
+                jsLog("printOriginalPdf: probing ports...");
+                final boolean[] portResults = new boolean[2];
+                Thread t631  = new Thread(() -> portResults[0] = isPortOpen(host, 631, 2000));
+                Thread t9100 = new Thread(() -> portResults[1] = isPortOpen(host, 9100, 2000));
+                t631.start(); t9100.start();
+                try { t631.join(); } catch (InterruptedException ignored) {}
+                try { t9100.join(); } catch (InterruptedException ignored) {}
+                boolean port631Open  = portResults[0];
+                boolean port9100Open = portResults[1];
+                jsLog("printOriginalPdf: port 631=" + (port631Open ? "OPEN" : "CLOSED")
+                    + " port 9100=" + (port9100Open ? "OPEN" : "CLOSED"));
+
+                Exception lastError = null;
+
+                // Strategy 1: Send PDF directly via port 9100 with PJL
+                if (port9100Open) {
+                    try {
+                        trySendRaw9100_pdf(host, pdfBytes);
+                        jsLog("=== printOriginalPdf SUCCESS via port 9100 (PJL) ===");
+                        runOnUiThread(() ->
+                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                        return;
+                    } catch (Exception e) {
+                        jsLog("printOriginalPdf: port 9100 PJL FAILED: " + e.getMessage());
+                        lastError = e;
+                    }
+
+                    Thread.sleep(1000);
+
+                    // Strategy 1B: Raw PDF without PJL
+                    try {
+                        trySendRaw9100_pdfNoPjl(host, pdfBytes);
+                        jsLog("=== printOriginalPdf SUCCESS via port 9100 (raw) ===");
+                        runOnUiThread(() ->
+                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                        return;
+                    } catch (Exception e) {
+                        jsLog("printOriginalPdf: port 9100 raw FAILED: " + e.getMessage());
+                        lastError = e;
+                    }
+                }
+
+                // Strategy 2: Send PDF via IPP on port 631
+                if (port631Open) {
+                    String ippPath = "/ipp/print";
+                    if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
+                        ippPath = printerResourcePath.startsWith("/")
+                            ? printerResourcePath : "/" + printerResourcePath;
+                    }
+                    try {
+                        trySendIPP(host, 631, ippPath, pdfBytes, copies, "application/pdf");
+                        jsLog("=== printOriginalPdf SUCCESS via IPP 631 ===");
+                        runOnUiThread(() ->
+                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                        return;
+                    } catch (Exception e) {
+                        jsLog("printOriginalPdf: IPP 631 FAILED: " + e.getMessage());
+                        lastError = e;
+                    }
+                }
+
+                throw lastError != null ? lastError : new Exception("All print attempts failed");
+
+            } catch (Exception e) {
+                jsLog("=== printOriginalPdf FAILED === " + e.getMessage());
+                final String errMsg = e.getMessage();
+                runOnUiThread(() -> {
+                    Toast.makeText(this, "Direct print failed: " + errMsg, Toast.LENGTH_LONG).show();
+                    printViaSystemDialog(copies);
+                });
+            }
+        }).start();
     }
 
     // ══════════════════════════════════════════
@@ -1254,6 +1366,20 @@ public class MainActivity extends AppCompatActivity {
                 + " copies=" + copies + " pagesJson length="
                 + (pagesJson != null ? pagesJson.length() : "null"));
             printDirectIPP(pagesJson, layout, copies);
+        }
+
+        @JavascriptInterface
+        public void printDirectPdf(int copies) {
+            Log.d(TAG, ">>> JS Bridge: printDirectPdf() called, copies=" + copies
+                + " hasPdfBytes=" + (originalPdfBytes != null));
+            jsLog("JS Bridge: printDirectPdf copies=" + copies
+                + " pdfSize=" + (originalPdfBytes != null ? originalPdfBytes.length : 0));
+            printOriginalPdf(copies);
+        }
+
+        @JavascriptInterface
+        public boolean hasOriginalPdf() {
+            return originalPdfBytes != null;
         }
 
         @JavascriptInterface

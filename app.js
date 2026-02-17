@@ -423,7 +423,11 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       buildPrintArea();
       if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
-        if ((contentType === 'pdf' || contentType === 'image') && pageImages.length > 0) {
+        if (contentType === 'pdf' && window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf()) {
+          // Send original PDF bytes directly — no rasterization, no format conversion
+          console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirectPdf() copies=' + copies);
+          window.AndroidBridge.printDirectPdf(copies);
+        } else if ((contentType === 'pdf' || contentType === 'image') && pageImages.length > 0) {
           var layout = parseInt(layoutSelect.value, 10);
           console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirect() layout=' + layout
             + ' copies=' + copies + ' pages=' + pageImages.length);
