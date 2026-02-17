@@ -31,6 +31,7 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import org.json.JSONArray;
 
@@ -45,6 +46,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "iPrintScan";
     private static final int FILE_CHOOSER_REQUEST = 100;
+    private SwipeRefreshLayout swipeRefreshLayout;
     private WebView webView;
     private Uri currentFileUri;
     private String currentFileName;
@@ -71,8 +73,15 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // Wrap WebView in SwipeRefreshLayout for pull-to-refresh
+        swipeRefreshLayout = new SwipeRefreshLayout(this);
         webView = new WebView(this);
-        setContentView(webView);
+        swipeRefreshLayout.addView(webView);
+        setContentView(swipeRefreshLayout);
+
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            webView.reload();
+        });
 
         // Enable remote debugging so errors are visible in chrome://inspect
         WebView.setWebContentsDebuggingEnabled(true);
@@ -84,10 +93,16 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
 
+        // Only allow swipe-to-refresh when WebView is scrolled to the top
+        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            swipeRefreshLayout.setEnabled(scrollY == 0);
+        });
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
                 pageLoaded = true;
+                swipeRefreshLayout.setRefreshing(false);
                 // If a file was opened before the page loaded, inject the pre-read data now
                 if (pendingBase64Data != null) {
                     injectFileData(pendingFileName, pendingMimeType, pendingBase64Data);
