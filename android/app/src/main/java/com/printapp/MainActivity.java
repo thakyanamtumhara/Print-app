@@ -37,6 +37,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
@@ -475,8 +477,10 @@ public class MainActivity extends AppCompatActivity {
                     pageDataUrls[i] = arr.getString(i);
                 }
 
-                byte[] pdfData = createPdfFromImages(pageDataUrls, layout);
-                sendIPP(pdfData, copies);
+                List<byte[]> jpegPages = createJpegPages(pageDataUrls, layout);
+                for (byte[] jpegData : jpegPages) {
+                    sendIPP(jpegData, copies);
+                }
 
                 runOnUiThread(() ->
                     Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
@@ -492,13 +496,14 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    private byte[] createPdfFromImages(String[] imageDataUrls, int layout) throws Exception {
-        PdfDocument pdf = new PdfDocument();
+    private List<byte[]> createJpegPages(String[] imageDataUrls, int layout) throws Exception {
+        List<byte[]> pages = new ArrayList<>();
 
-        int pageWidth = 595;
-        int pageHeight = 842;
-        int padding = 14;
-        int gap = 6;
+        // A4 at 300 DPI
+        int pageWidth = 2480;
+        int pageHeight = 3508;
+        int padding = 58;
+        int gap = 25;
 
         int cols, rows;
         switch (layout) {
@@ -512,10 +517,8 @@ public class MainActivity extends AppCompatActivity {
         int cellHeight = (pageHeight - 2 * padding - (rows - 1) * gap) / rows;
 
         for (int i = 0; i < imageDataUrls.length; i += layout) {
-            PdfDocument.PageInfo pageInfo =
-                new PdfDocument.PageInfo.Builder(pageWidth, pageHeight, i / layout + 1).create();
-            PdfDocument.Page page = pdf.startPage(pageInfo);
-            Canvas canvas = page.getCanvas();
+            Bitmap pageBitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.RGB_565);
+            Canvas canvas = new Canvas(pageBitmap);
             canvas.drawColor(0xFFFFFFFF);
 
             for (int j = 0; j < layout && (i + j) < imageDataUrls.length; j++) {
@@ -548,16 +551,16 @@ public class MainActivity extends AppCompatActivity {
                 scaled.recycle();
             }
 
-            pdf.finishPage(page);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            pageBitmap.compress(Bitmap.CompressFormat.JPEG, 92, out);
+            pageBitmap.recycle();
+            pages.add(out.toByteArray());
         }
 
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        pdf.writeTo(out);
-        pdf.close();
-        return out.toByteArray();
+        return pages;
     }
 
-    private void sendIPP(byte[] pdfData, int copies) throws Exception {
+    private void sendIPP(byte[] imageData, int copies) throws Exception {
         String host = printerHost;
         int port = printerPort;
 
@@ -571,24 +574,35 @@ public class MainActivity extends AppCompatActivity {
             pathsToTry = new String[]{ "/ipp/print", "/ipp/printer", "/ipp" };
         }
 
+        // Try formats: JPEG first (widely supported), then octet-stream (auto-detect)
+        String[] formatsToTry = { "image/jpeg", "application/octet-stream" };
+
         Exception lastError = null;
-        for (String path : pathsToTry) {
-            try {
-                trySendIPP(host, port, path, pdfData, copies);
-                Log.d(TAG, "IPP succeeded with path: " + path);
-                // Remember working path for next time
-                printerResourcePath = path;
-                return;
-            } catch (Exception e) {
-                Log.w(TAG, "IPP failed with path " + path + ": " + e.getMessage());
-                lastError = e;
+        for (String format : formatsToTry) {
+            for (String path : pathsToTry) {
+                try {
+                    trySendIPP(host, port, path, imageData, copies, format);
+                    Log.d(TAG, "IPP succeeded with path: " + path + " format: " + format);
+                    // Remember working path for next time
+                    printerResourcePath = path;
+                    return;
+                } catch (Exception e) {
+                    String msg = e.getMessage();
+                    Log.w(TAG, "IPP failed path=" + path + " format=" + format + ": " + msg);
+                    lastError = e;
+                    // If format not supported (0x040a), skip to next format
+                    if (msg != null && msg.contains("0x40a")) {
+                        Log.d(TAG, "Format " + format + " not supported, trying next");
+                        break;
+                    }
+                }
             }
         }
-        throw lastError != null ? lastError : new Exception("All IPP paths failed");
+        throw lastError != null ? lastError : new Exception("All IPP attempts failed");
     }
 
     private void trySendIPP(String host, int port, String path,
-                             byte[] pdfData, int copies) throws Exception {
+                             byte[] data, int copies, String documentFormat) throws Exception {
         String printerUri = "ipp://" + host + ":" + port + path;
 
         URL url = new URL("http://" + host + ":" + port + path);
@@ -615,8 +629,7 @@ public class MainActivity extends AppCompatActivity {
         writeIPPString(ipp, 0x45, "printer-uri", printerUri);
         writeIPPString(ipp, 0x42, "requesting-user-name", "iPrintScan");
         writeIPPString(ipp, 0x42, "job-name", "iPrint&Scan Job");
-        // Explicitly tell printer the data is PDF
-        writeIPPString(ipp, 0x49, "document-format", "application/pdf");
+        writeIPPString(ipp, 0x49, "document-format", documentFormat);
 
         // Job attributes
         ipp.write(0x02);
@@ -627,7 +640,7 @@ public class MainActivity extends AppCompatActivity {
 
         OutputStream out = conn.getOutputStream();
         out.write(ipp.toByteArray());
-        out.write(pdfData);
+        out.write(data);
         out.flush();
         out.close();
 
@@ -746,7 +759,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ── Direct IPP for labels (WebView → PdfDocument → IPP) ──
+    // ── Direct IPP for labels (WebView → JPEG → IPP) ──
     private void printLabelDirectIPP(int copies) {
         if (printerHost == null) {
             printViaSystemDialog(copies);
@@ -767,33 +780,31 @@ public class MainActivity extends AppCompatActivity {
                 // Wait for WebView to re-render with print content
                 webView.postDelayed(() -> {
                     try {
-                        // Create PDF from WebView content using PdfDocument
-                        PdfDocument doc = new PdfDocument();
-                        int pdfWidth = 595;  // A4 at 72 DPI
-                        int pdfHeight = 842;
-                        PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
-                            pdfWidth, pdfHeight, 1).create();
-                        PdfDocument.Page page = doc.startPage(pageInfo);
+                        // Render WebView content to a high-resolution JPEG
+                        int bmpWidth = 2480;   // A4 at 300 DPI
+                        int bmpHeight = 3508;
 
-                        Canvas canvas = page.getCanvas();
-                        float scale = (float) pdfWidth / webView.getWidth();
+                        Bitmap pageBitmap = Bitmap.createBitmap(
+                            bmpWidth, bmpHeight, Bitmap.Config.RGB_565);
+                        Canvas canvas = new Canvas(pageBitmap);
+                        canvas.drawColor(0xFFFFFFFF);
+
+                        float scale = (float) bmpWidth / webView.getWidth();
                         canvas.scale(scale, scale);
                         webView.draw(canvas);
 
-                        doc.finishPage(page);
-
                         ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                        doc.writeTo(bos);
-                        doc.close();
-                        byte[] pdfData = bos.toByteArray();
+                        pageBitmap.compress(Bitmap.CompressFormat.JPEG, 92, bos);
+                        pageBitmap.recycle();
+                        byte[] jpegData = bos.toByteArray();
 
                         // Restore UI
                         restoreWebViewUI();
 
-                        // Send PDF to printer on background thread
+                        // Send JPEG to printer on background thread
                         new Thread(() -> {
                             try {
-                                sendIPP(pdfData, copies);
+                                sendIPP(jpegData, copies);
                                 runOnUiThread(() ->
                                     Toast.makeText(MainActivity.this,
                                         "Sent to printer", Toast.LENGTH_SHORT).show());
