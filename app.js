@@ -180,16 +180,16 @@ document.addEventListener('DOMContentLoaded', () => {
   whiteoutCanvas.addEventListener('mouseup', onDrawEnd);
   whiteoutCanvas.addEventListener('mouseleave', onDrawEnd);
 
-  // Edit mode toggle
+  // Edit mode toggle — use inline styles to avoid CSS cache issues
   function setEditMode(on) {
     editMode = on;
     if (on) {
       previewArea.classList.add('edit-mode');
-      editBanner.classList.add('active');
+      editBanner.style.display = 'flex';
       editBtn.classList.add('edit-active');
     } else {
       previewArea.classList.remove('edit-mode');
-      editBanner.classList.remove('active');
+      editBanner.style.display = 'none';
       editBtn.classList.remove('edit-active');
     }
   }

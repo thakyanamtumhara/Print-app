@@ -29,12 +29,12 @@
       </button>
     </header>
 
-    <!-- Edit Mode Banner (hidden by default) -->
-    <div class="edit-banner" id="editBanner">
+    <!-- Edit Mode Banner (hidden until eraser tapped) -->
+    <div id="editBanner" style="display:none;align-items:center;justify-content:space-between;padding:8px 16px;background:#fff3cd;color:#856404;font-size:13px;font-weight:500">
       <span>White-out: drag to cover text</span>
-      <div class="edit-banner-actions">
-        <button class="banner-btn" id="undoBtn">Undo</button>
-        <button class="banner-btn done-btn" id="doneEditBtn">Done</button>
+      <div style="display:flex;gap:8px">
+        <button id="undoBtn" style="background:none;border:1px solid #b8860b;border-radius:6px;color:#856404;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer">Undo</button>
+        <button id="doneEditBtn" style="background:#007aff;border:1px solid #007aff;border-radius:6px;color:#fff;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer">Done</button>
       </div>
     </div>
 
