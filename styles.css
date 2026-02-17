@@ -505,6 +505,7 @@ html, body {
     gap: 2mm;
     box-sizing: border-box;
     page-break-after: always;
+    overflow: hidden;
   }
 
   .print-sheet:last-child {
@@ -535,6 +536,8 @@ html, body {
     position: relative;
     overflow: hidden;
     border: 0.5px solid #eee;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
 
   .print-tile img {
@@ -546,15 +549,19 @@ html, body {
   .print-tile-content {
     width: 100%;
     height: 100%;
+    overflow: hidden;
   }
 
   .print-tile-content .label-container {
     box-shadow: none;
     height: 100%;
+    overflow: hidden;
   }
 
   .print-tile-content .shipping-label {
-    height: 100%;
+    height: auto;
+    margin: 0;
+    border-width: 1px;
   }
 
   .print-tile-overlay {
