@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var layoutSelect = document.getElementById('layoutSelect');
   var labelContainer = document.getElementById('labelContainer');
   var previewWrapper = document.getElementById('previewWrapper');
+  var previewArea = document.getElementById('previewArea');
   var whiteoutCanvas = document.getElementById('whiteoutCanvas');
   var undoBtn = document.getElementById('undoBtn');
   var printArea = document.getElementById('printArea');
@@ -23,16 +24,15 @@ document.addEventListener('DOMContentLoaded', () => {
   var printerText = document.getElementById('printerText');
   var openFileBtn = document.getElementById('openFileBtn');
   var fileInput = document.getElementById('fileInput');
+  var eraserToggle = document.getElementById('eraserToggle');
 
   var copies = 1;
   var pageImages = [];     // data-URL per PDF/image page (for printing)
   var contentType = 'label'; // 'label' | 'pdf' | 'image'
+  var eraserActive = false;
 
   // ── Printer status ──
-  // Android app: green/red blink based on actual WiFi detection
-  // Web browser: neutral gray (browser print dialog picks printer)
   function updatePrinterStatus(status) {
-    // status: 'connected' | 'disconnected' | 'neutral'
     printerDot.classList.remove('connected', 'neutral');
     if (status === 'connected') {
       printerDot.classList.add('connected');
@@ -57,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
     updatePrinterStatus(connected ? 'connected' : 'disconnected');
   };
 
-  // Poll every 5s (only useful when Android bridge is present)
   setInterval(checkPrinter, 5000);
   checkPrinter();
 
@@ -89,14 +88,25 @@ document.addEventListener('DOMContentLoaded', () => {
     var pages = (contentType === 'image') ? Array(layout).fill(pageImages[0]) : pageImages;
 
     if (layout === 1) {
-      // 1 per sheet: show pages vertically (normal scroll)
+      // 1 per sheet: show each page as a separate A4 sheet preview
       var container = document.createElement('div');
-      container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px';
+      container.className = 'preview-sheets';
       for (var i = 0; i < pages.length; i++) {
+        var sheet = document.createElement('div');
+        sheet.className = 'preview-sheet preview-layout-1';
+        var tile = document.createElement('div');
+        tile.className = 'preview-tile';
         var img = document.createElement('img');
         img.src = pages[i];
-        img.style.cssText = 'width:100%;display:block;border-radius:4px;background:#fff';
-        container.appendChild(img);
+        tile.appendChild(img);
+        sheet.appendChild(tile);
+        container.appendChild(sheet);
+        if (pages.length > 1) {
+          var lbl = document.createElement('div');
+          lbl.className = 'preview-sheet-label';
+          lbl.textContent = 'Page ' + (i + 1) + ' of ' + pages.length;
+          container.appendChild(lbl);
+        }
       }
       labelContainer.appendChild(container);
     } else {
@@ -133,12 +143,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ══════════════════════════════════════════
   // ── PINCH ZOOM (preview only) ──
-  // Two fingers on preview = zoom. One finger = draw white.
+  // Eraser OFF → scroll freely, pinch zoom via previewArea
+  // Eraser ON  → canvas handles draw + pinch zoom
   // ══════════════════════════════════════════
   var zoom = 1;
   var isPinching = false;
   var pinchStartDist = 0;
   var pinchStartZoom = 1;
+  var pinchCenterX = 0;
+  var pinchCenterY = 0;
+  var pinchStartScrollX = 0;
+  var pinchStartScrollY = 0;
 
   function getPinchDist(touches) {
     var dx = touches[0].clientX - touches[1].clientX;
@@ -147,17 +162,75 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function applyZoom() {
-    previewWrapper.style.transform = 'scale(' + zoom + ')';
-    var extraW = previewWrapper.scrollWidth * (zoom - 1);
-    var extraH = previewWrapper.scrollHeight * (zoom - 1);
-    previewWrapper.style.marginRight = extraW + 'px';
-    previewWrapper.style.marginBottom = extraH + 'px';
+    previewWrapper.style.transform = zoom === 1 ? '' : 'scale(' + zoom + ')';
+    var w = previewWrapper.offsetWidth;
+    var h = previewWrapper.offsetHeight;
+    previewWrapper.style.marginRight = zoom === 1 ? '' : (w * (zoom - 1)) + 'px';
+    previewWrapper.style.marginBottom = zoom === 1 ? '' : (h * (zoom - 1)) + 'px';
   }
 
+  function startPinch(touches) {
+    isPinching = true;
+    pinchStartDist = getPinchDist(touches);
+    pinchStartZoom = zoom;
+    var rect = previewArea.getBoundingClientRect();
+    var center = {
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2
+    };
+    pinchCenterX = center.x - rect.left;
+    pinchCenterY = center.y - rect.top;
+    pinchStartScrollX = previewArea.scrollLeft;
+    pinchStartScrollY = previewArea.scrollTop;
+  }
+
+  function movePinch(touches) {
+    var dist = getPinchDist(touches);
+    zoom = Math.max(1, Math.min(5, pinchStartZoom * (dist / pinchStartDist)));
+    applyZoom();
+    // Keep pinch center point stationary
+    var contentX = (pinchStartScrollX + pinchCenterX) / pinchStartZoom;
+    var contentY = (pinchStartScrollY + pinchCenterY) / pinchStartZoom;
+    previewArea.scrollLeft = Math.max(0, contentX * zoom - pinchCenterX);
+    previewArea.scrollTop = Math.max(0, contentY * zoom - pinchCenterY);
+  }
+
+  function resetZoom() {
+    zoom = 1;
+    isPinching = false;
+    previewWrapper.style.transform = '';
+    previewWrapper.style.marginRight = '';
+    previewWrapper.style.marginBottom = '';
+    previewArea.scrollLeft = 0;
+    previewArea.scrollTop = 0;
+  }
+
+  // Pinch zoom on preview area (when eraser is off, canvas has pointer-events:none)
+  previewArea.addEventListener('touchstart', function(e) {
+    if (eraserActive) return;
+    if (e.touches.length >= 2) {
+      e.preventDefault();
+      startPinch(e.touches);
+    }
+  }, { passive: false });
+
+  previewArea.addEventListener('touchmove', function(e) {
+    if (eraserActive) return;
+    if (e.touches.length >= 2 && isPinching) {
+      e.preventDefault();
+      movePinch(e.touches);
+    }
+  }, { passive: false });
+
+  previewArea.addEventListener('touchend', function(e) {
+    if (eraserActive) return;
+    if (e.touches.length < 2) isPinching = false;
+  }, { passive: false });
+
   // ══════════════════════════════════════════
-  // ── WHITE-OUT CANVAS (always active) ──
+  // ── WHITE-OUT CANVAS ──
+  // Active only when eraser is ON.
   // One finger = draw white. Two fingers = pinch zoom.
-  // touch-action: none — we handle ALL touches in JS.
   // ══════════════════════════════════════════
   var strokes = [];
   var currentStroke = null;
@@ -218,15 +291,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Two fingers → pinch zoom
     if (e.touches && e.touches.length >= 2) {
       e.preventDefault();
-      isPinching = true;
       currentStroke = null;
-      pinchStartDist = getPinchDist(e.touches);
-      pinchStartZoom = zoom;
+      startPinch(e.touches);
       return;
     }
     // Don't start drawing right after a pinch ends
     if (isPinching) return;
-    // One finger → record start (don't preventDefault yet, let browser decide scroll vs draw)
+    // One finger → record start
     var p = pos(e);
     currentStroke = { pts: [p], brush: getBrush() };
   }
@@ -235,19 +306,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Pinch zoom — prevent scroll during pinch
     if (e.touches && e.touches.length >= 2 && isPinching) {
       e.preventDefault();
-      var dist = getPinchDist(e.touches);
-      zoom = Math.max(1, Math.min(5, pinchStartZoom * (dist / pinchStartDist)));
-      applyZoom();
+      movePinch(e.touches);
       currentStroke = null;
       return;
     }
     if (!e.touches) e.preventDefault();
     // If second finger was just added, cancel drawing
     if (e.touches && e.touches.length >= 2) {
-      isPinching = true;
       currentStroke = null;
-      pinchStartDist = getPinchDist(e.touches);
-      pinchStartZoom = zoom;
+      startPinch(e.touches);
       return;
     }
     if (!currentStroke) return;
@@ -291,7 +358,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawCancel() {
-    // Browser took over (scrolling) — discard partial stroke
     currentStroke = null;
     isPinching = false;
   }
@@ -326,6 +392,22 @@ document.addEventListener('DOMContentLoaded', () => {
     })(ti);
   }
   updateThicknessUI();
+
+  // ── Eraser toggle ──
+  function updateEraserState() {
+    eraserToggle.classList.toggle('active', eraserActive);
+    thicknessBar.style.display = eraserActive ? 'flex' : 'none';
+    whiteoutCanvas.style.pointerEvents = eraserActive ? 'auto' : 'none';
+    whiteoutCanvas.style.touchAction = eraserActive ? 'none' : 'auto';
+    whiteoutCanvas.style.cursor = eraserActive ? 'crosshair' : 'default';
+  }
+
+  eraserToggle.addEventListener('click', function() {
+    eraserActive = !eraserActive;
+    updateEraserState();
+  });
+
+  updateEraserState();
 
   // Floating undo button
   function updateUndoBtn() {
@@ -427,21 +509,25 @@ document.addEventListener('DOMContentLoaded', () => {
     currentStroke = null;
     ctx.clearRect(0, 0, whiteoutCanvas.width, whiteoutCanvas.height);
     updateUndoBtn();
+    resetZoom();
   }
 
   function renderPdfPages(pdfData) {
-    labelContainer.innerHTML = '';
+    labelContainer.innerHTML = '<div style="padding:32px;text-align:center;color:#888"><div style="font-size:13px">Loading PDF...</div></div>';
     pageImages = [];
     contentType = 'pdf';
-    var container = document.createElement('div');
-    container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px';
-    labelContainer.appendChild(container);
+    layoutSelect.value = '1'; // default 1 per sheet for PDFs
+
+    var containerWidth = labelContainer.offsetWidth - 16;
+    if (containerWidth <= 0) containerWidth = 400;
 
     pdfjsLib.getDocument(pdfData).promise.then(function(pdf) {
       function renderPage(num) {
-        if (num > pdf.numPages) { resizeCanvas(); return; }
+        if (num > pdf.numPages) {
+          updatePreviewLayout();
+          return;
+        }
         pdf.getPage(num).then(function(page) {
-          var containerWidth = labelContainer.offsetWidth - 16;
           var vp = page.getViewport({ scale: 1 });
           var scale = (containerWidth / vp.width) * 2; // 2x for print quality
           var scaled = page.getViewport({ scale: scale });
@@ -449,8 +535,6 @@ document.addEventListener('DOMContentLoaded', () => {
           var canvas = document.createElement('canvas');
           canvas.width = scaled.width;
           canvas.height = scaled.height;
-          canvas.style.cssText = 'width:100%;display:block;border-radius:4px;background:#fff';
-          container.appendChild(canvas);
 
           page.render({ canvasContext: canvas.getContext('2d'), viewport: scaled }).promise.then(function() {
             pageImages.push(canvas.toDataURL('image/png'));
