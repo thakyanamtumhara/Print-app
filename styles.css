@@ -446,6 +446,105 @@ html, body {
   margin-top: -8px;
 }
 
+/* ── Page Selector Strip (thumbnails with checkmarks) ── */
+.page-selector-strip {
+  display: flex;
+  gap: 8px;
+  padding: 8px 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.page-thumb {
+  position: relative;
+  width: 52px;
+  min-width: 52px;
+  aspect-ratio: 210 / 297;
+  border: 2px solid #007aff;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.page-thumb:not(.selected) {
+  border-color: #ccc;
+  opacity: 0.4;
+}
+
+.page-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.page-check {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #007aff;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.page-thumb:not(.selected) .page-check {
+  background: #ccc;
+}
+
+.page-thumb-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 9px;
+  color: #fff;
+  background: rgba(0,0,0,0.45);
+  padding: 1px 0;
+}
+
+/* ── Eraser Toggle Button ── */
+.eraser-toggle {
+  position: fixed;
+  bottom: 220px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid #d1d1d6;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.eraser-toggle.active {
+  background: #007aff;
+  border-color: #007aff;
+}
+
+.eraser-toggle svg {
+  transition: stroke 0.15s;
+}
+
+.eraser-toggle.active svg {
+  stroke: #fff;
+}
+
 /* ── Hidden Print Area ── */
 #printArea {
   display: none;

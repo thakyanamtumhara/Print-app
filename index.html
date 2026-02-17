@@ -60,12 +60,18 @@
             </div>
           </div>
         </div>
-        <canvas id="whiteoutCanvas" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;border-radius:6px;touch-action:pan-y;cursor:crosshair"></canvas>
+        <canvas id="whiteoutCanvas" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;border-radius:6px;touch-action:pan-y;pointer-events:none;cursor:default"></canvas>
       </div>
     </main>
 
-    <!-- Floating Undo button (appears after drawing) -->
-    <button id="undoBtn" style="display:none;position:fixed;bottom:220px;right:16px;width:44px;height:44px;border-radius:50%;background:#fff;border:1px solid #ddd;box-shadow:0 2px 8px rgba(0,0,0,0.15);align-items:center;justify-content:center;font-size:18px;cursor:pointer;z-index:20">&#8617;</button>
+    <!-- Floating Eraser toggle + Undo button -->
+    <button id="eraserToggle" class="eraser-toggle" title="Toggle Eraser">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 20H7L3 16C2.4 15.4 2.4 14.6 3 14L13 4L20 11L12 19"/>
+        <path d="M13 4L20 11"/>
+      </svg>
+    </button>
+    <button id="undoBtn" style="display:none;position:fixed;bottom:270px;right:16px;width:44px;height:44px;border-radius:50%;background:#fff;border:1px solid #ddd;box-shadow:0 2px 8px rgba(0,0,0,0.15);align-items:center;justify-content:center;font-size:18px;cursor:pointer;z-index:20">&#8617;</button>
 
     <!-- Eraser thickness: 1 2 3 4 -->
     <div class="thickness-bar" id="thicknessBar">
