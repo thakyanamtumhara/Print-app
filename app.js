@@ -528,8 +528,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ── Open File button (file picker) ──
-  openFileBtn.addEventListener('click', function() { fileInput.click(); });
+  openFileBtn.addEventListener('click', function() {
+    console.log('Open File button clicked');
+    fileInput.click();
+  });
   fileInput.addEventListener('change', function() {
+    console.log('File selected:', fileInput.files[0] ? fileInput.files[0].name : 'none');
     if (fileInput.files && fileInput.files[0]) {
       displayFile(fileInput.files[0]);
       fileInput.value = '';
