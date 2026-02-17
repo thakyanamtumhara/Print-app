@@ -379,11 +379,22 @@ html, body {
   border-radius: 14px;
   cursor: pointer;
   letter-spacing: -0.1px;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.1s;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
 }
 
-.print-btn:active {
-  background: #0062d1;
+.print-btn:active,
+.print-btn.print-btn-pressed {
+  background: #0056b8;
+  transform: scale(0.96);
+  box-shadow: 0 1px 3px rgba(0, 122, 255, 0.2);
+}
+
+.print-btn:disabled {
+  background: #a0c4f5;
+  box-shadow: none;
+  cursor: default;
+  transform: none;
 }
 
 /* ── Preview Sheet Layout (in-app live preview) ── */

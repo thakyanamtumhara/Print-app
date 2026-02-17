@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Layout change → update in-app preview ──
   layoutSelect.addEventListener('change', function() {
+    bakeStrokes(); // preserve eraser marks before rebuilding layout
     updatePreviewLayout();
   });
 
@@ -109,6 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (selectedPages[i]) { anySelected = true; break; }
     }
     if (!anySelected) { selectedPages[idx] = true; }
+    bakeStrokes(); // preserve eraser marks before rebuilding layout
     updatePreviewLayout();
   }
 
@@ -481,7 +483,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     isPrinting = true;
     printBtn.disabled = true;
+
+    // Visual press feedback
+    printBtn.classList.add('print-btn-pressed');
+    setTimeout(function() { printBtn.classList.remove('print-btn-pressed'); }, 200);
+
     try {
+      // Bake any eraser marks into page images before printing
+      bakeStrokes();
+
       var layout = parseInt(layoutSelect.value, 10);
       // Filter to only selected pages
       var selectedImgs = [];
@@ -506,7 +516,17 @@ document.addEventListener('DOMContentLoaded', () => {
           window.AndroidBridge.print(copies);
         }
       } else {
-        console.log('[PRINT-DEBUG] Calling window.print() (browser path)');
+        // Browser path: duplicate sheets to handle copies
+        if (copies > 1) {
+          console.log('[PRINT-DEBUG] Browser path: duplicating sheets for ' + copies + ' copies');
+          var sheetsHtml = printArea.innerHTML;
+          var allCopies = '';
+          for (var c = 0; c < copies; c++) {
+            allCopies += sheetsHtml;
+          }
+          printArea.innerHTML = allCopies;
+        }
+        console.log('[PRINT-DEBUG] Calling window.print() (browser path) copies=' + copies);
         window.print();
       }
     } catch (err) {
@@ -540,6 +560,62 @@ document.addEventListener('DOMContentLoaded', () => {
     currentStroke = null;
     ctx.clearRect(0, 0, whiteoutCanvas.width, whiteoutCanvas.height);
     updateUndoBtn();
+  }
+
+  // Bake white-out strokes permanently into pageImages so eraser marks
+  // survive layout changes and appear in print output for PDF/image content.
+  function bakeStrokes() {
+    if (strokes.length === 0 || pageImages.length === 0) return;
+    if (contentType === 'label') return;
+
+    var containerRect = labelContainer.getBoundingClientRect();
+    if (containerRect.width === 0 || containerRect.height === 0) return;
+
+    var scaleX = whiteoutCanvas.width / containerRect.width;
+    var scaleY = whiteoutCanvas.height / containerRect.height;
+
+    // Collect displayed page <img> elements, skipping thumbnail strip
+    var allImgs = labelContainer.querySelectorAll('img');
+    var pageImgEls = [];
+    for (var i = 0; i < allImgs.length; i++) {
+      if (!allImgs[i].closest('.page-thumb')) pageImgEls.push(allImgs[i]);
+    }
+    if (pageImgEls.length === 0) return;
+
+    // Map displayed tile index → pageImages index (accounting for deselected pages)
+    var selIndexes = [];
+    for (var i = 0; i < selectedPages.length; i++) {
+      if (selectedPages[i] !== false) selIndexes.push(i);
+    }
+
+    var baked = {};
+    for (var t = 0; t < pageImgEls.length; t++) {
+      var pageIdx = (contentType === 'image') ? 0 : (t < selIndexes.length ? selIndexes[t] : -1);
+      if (pageIdx < 0 || baked[pageIdx]) continue;
+
+      var imgEl = pageImgEls[t];
+      var imgRect = imgEl.getBoundingClientRect();
+
+      // Map image position to canvas pixel coordinates
+      var cx = (imgRect.left - containerRect.left) * scaleX;
+      var cy = (imgRect.top - containerRect.top) * scaleY;
+      var cw = imgRect.width * scaleX;
+      var ch = imgRect.height * scaleY;
+      if (cw <= 0 || ch <= 0) continue;
+
+      // Composite: draw original page then overlay whiteout region
+      var tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = imgEl.naturalWidth || Math.round(cw);
+      tmpCanvas.height = imgEl.naturalHeight || Math.round(ch);
+      var tmpCtx = tmpCanvas.getContext('2d');
+      tmpCtx.drawImage(imgEl, 0, 0, tmpCanvas.width, tmpCanvas.height);
+      tmpCtx.drawImage(whiteoutCanvas, cx, cy, cw, ch, 0, 0, tmpCanvas.width, tmpCanvas.height);
+
+      pageImages[pageIdx] = tmpCanvas.toDataURL('image/png');
+      baked[pageIdx] = true;
+    }
+
+    clearWhiteout();
   }
 
   function renderPdfPages(pdfData) {
