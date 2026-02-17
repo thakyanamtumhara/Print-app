@@ -16,6 +16,8 @@ document.addEventListener('DOMContentLoaded', () => {
   var printArea = document.getElementById('printArea');
   var printerDot = document.getElementById('printerDot');
   var printerText = document.getElementById('printerText');
+  var openFileBtn = document.getElementById('openFileBtn');
+  var fileInput = document.getElementById('fileInput');
 
   var copies = 1;
 
@@ -385,6 +387,15 @@ document.addEventListener('DOMContentLoaded', () => {
         '</div>';
     }
   }
+
+  // ── Open File button (file picker) ──
+  openFileBtn.addEventListener('click', function() { fileInput.click(); });
+  fileInput.addEventListener('change', function() {
+    if (fileInput.files && fileInput.files[0]) {
+      displayFile(fileInput.files[0]);
+      fileInput.value = '';
+    }
+  });
 
   window.handleNativeFile = displayFileFromBase64;
 
