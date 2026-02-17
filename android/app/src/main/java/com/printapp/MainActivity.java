@@ -2,8 +2,8 @@ package com.printapp;
 
 import android.content.Intent;
 import android.database.Cursor;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.net.nsd.NsdManager;
+import android.net.nsd.NsdServiceInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.CancellationSignal;
@@ -15,6 +15,7 @@ import android.print.PrintDocumentInfo;
 import android.print.PrintManager;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.util.Log;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -30,11 +31,17 @@ import java.io.OutputStream;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String TAG = "iPrintScan";
     private WebView webView;
     private Uri currentFileUri;
     private String currentFileName;
     private String currentMimeType;
     private static final String PWA_URL = "https://thakyanamtumhara.github.io/Print-app/";
+
+    // ── Printer discovery via NSD (mDNS) ──
+    private NsdManager nsdManager;
+    private NsdManager.DiscoveryListener discoveryListener;
+    private volatile boolean printerFound = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,6 +68,79 @@ public class MainActivity extends AppCompatActivity {
 
         // Handle incoming file intent
         handleIncomingIntent(getIntent());
+
+        // Start discovering printers on WiFi
+        startPrinterDiscovery();
+    }
+
+    // ══════════════════════════════════════════
+    // ── NSD Printer Discovery ──
+    // Finds printers advertising _ipp._tcp on local network.
+    // Brother printers show up as "Brother HL-B2080DW" etc.
+    // ══════════════════════════════════════════
+    private void startPrinterDiscovery() {
+        nsdManager = (NsdManager) getSystemService(NSD_SERVICE);
+        if (nsdManager == null) return;
+
+        discoveryListener = new NsdManager.DiscoveryListener() {
+            @Override
+            public void onDiscoveryStarted(String serviceType) {
+                Log.d(TAG, "Printer discovery started");
+            }
+
+            @Override
+            public void onServiceFound(NsdServiceInfo serviceInfo) {
+                String name = serviceInfo.getServiceName();
+                Log.d(TAG, "Printer found: " + name);
+                printerFound = true;
+                pushPrinterStatus(true);
+            }
+
+            @Override
+            public void onServiceLost(NsdServiceInfo serviceInfo) {
+                String name = serviceInfo.getServiceName();
+                Log.d(TAG, "Printer lost: " + name);
+                printerFound = false;
+                pushPrinterStatus(false);
+            }
+
+            @Override
+            public void onDiscoveryStopped(String serviceType) {
+                Log.d(TAG, "Printer discovery stopped");
+            }
+
+            @Override
+            public void onStartDiscoveryFailed(String serviceType, int errorCode) {
+                Log.e(TAG, "Discovery start failed: " + errorCode);
+            }
+
+            @Override
+            public void onStopDiscoveryFailed(String serviceType, int errorCode) {
+                Log.e(TAG, "Discovery stop failed: " + errorCode);
+            }
+        };
+
+        // _ipp._tcp = Internet Printing Protocol (most WiFi printers including Brother)
+        nsdManager.discoverServices("_ipp._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListener);
+    }
+
+    private void pushPrinterStatus(boolean connected) {
+        runOnUiThread(() -> {
+            String js = "javascript:if(window.updatePrinterConnected)window.updatePrinterConnected(" + connected + ")";
+            webView.evaluateJavascript(js, null);
+        });
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (nsdManager != null && discoveryListener != null) {
+            try {
+                nsdManager.stopServiceDiscovery(discoveryListener);
+            } catch (Exception e) {
+                // Ignore if not started
+            }
+        }
     }
 
     @Override
@@ -232,6 +312,11 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public boolean isAndroid() {
             return true;
+        }
+
+        @JavascriptInterface
+        public boolean isPrinterConnected() {
+            return printerFound;
         }
     }
 }
