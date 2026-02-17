@@ -232,15 +232,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawMove(e) {
-    if (!e.touches) e.preventDefault();
-    // Pinch zoom
+    // Pinch zoom — prevent scroll during pinch
     if (e.touches && e.touches.length >= 2 && isPinching) {
+      e.preventDefault();
       var dist = getPinchDist(e.touches);
       zoom = Math.max(1, Math.min(5, pinchStartZoom * (dist / pinchStartDist)));
       applyZoom();
       currentStroke = null;
       return;
     }
+    if (!e.touches) e.preventDefault();
     // If second finger was just added, cancel drawing
     if (e.touches && e.touches.length >= 2) {
       isPinching = true;
@@ -297,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Touch
   whiteoutCanvas.addEventListener('touchstart', drawStart, { passive: false });
-  whiteoutCanvas.addEventListener('touchmove', drawMove, { passive: true });
+  whiteoutCanvas.addEventListener('touchmove', drawMove, { passive: false });
   whiteoutCanvas.addEventListener('touchend', drawEnd, { passive: false });
   whiteoutCanvas.addEventListener('touchcancel', drawCancel);
   // Mouse (desktop)
@@ -530,7 +531,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Open File button (file picker) ──
   openFileBtn.addEventListener('click', function() {
     console.log('Open File button clicked');
-    fileInput.click();
+    // Use native Android file picker if available (WebView fileInput.click() is unreliable)
+    if (window.AndroidBridge && typeof window.AndroidBridge.openFilePicker === 'function') {
+      window.AndroidBridge.openFilePicker();
+    } else {
+      fileInput.click();
+    }
   });
   fileInput.addEventListener('change', function() {
     console.log('File selected:', fileInput.files[0] ? fileInput.files[0].name : 'none');

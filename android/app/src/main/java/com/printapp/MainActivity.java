@@ -36,6 +36,8 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import org.json.JSONArray;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -46,6 +48,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "iPrintScan";
     private static final int FILE_CHOOSER_REQUEST = 100;
+    private static final int NATIVE_FILE_PICKER_REQUEST = 200;
     private SwipeRefreshLayout swipeRefreshLayout;
     private WebView webView;
     private Uri currentFileUri;
@@ -59,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
     // ── Printer discovery via NSD (mDNS) ──
     private NsdManager nsdManager;
     private NsdManager.DiscoveryListener discoveryListener;
+    private NsdManager.DiscoveryListener discoveryListenerIpps;
     private volatile boolean printerFound = false;
     private volatile String printerHost = null;
     private volatile int printerPort = 631;
@@ -177,6 +181,13 @@ public class MainActivity extends AppCompatActivity {
                 fileUploadCallback.onReceiveValue(results);
                 fileUploadCallback = null;
             }
+        } else if (requestCode == NATIVE_FILE_PICKER_REQUEST) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                Uri uri = data.getData();
+                if (uri != null) {
+                    loadFileIntoWebView(uri);
+                }
+            }
         }
     }
 
@@ -242,6 +253,50 @@ public class MainActivity extends AppCompatActivity {
         };
 
         nsdManager.discoverServices("_ipp._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListener);
+
+        // Also discover IPP over TLS — some printers only advertise _ipps._tcp
+        discoveryListenerIpps = new NsdManager.DiscoveryListener() {
+            @Override public void onDiscoveryStarted(String serviceType) {}
+            @Override public void onDiscoveryStopped(String serviceType) {}
+            @Override public void onStartDiscoveryFailed(String serviceType, int errorCode) {}
+            @Override public void onStopDiscoveryFailed(String serviceType, int errorCode) {}
+
+            @Override
+            public void onServiceFound(NsdServiceInfo serviceInfo) {
+                if (printerFound) return; // already found via _ipp._tcp
+                Log.d(TAG, "IPPS printer found: " + serviceInfo.getServiceName());
+                nsdManager.resolveService(serviceInfo, new NsdManager.ResolveListener() {
+                    @Override
+                    public void onResolveFailed(NsdServiceInfo si, int errorCode) {
+                        Log.e(TAG, "IPPS resolve failed: " + errorCode);
+                    }
+                    @Override
+                    public void onServiceResolved(NsdServiceInfo resolved) {
+                        if (!printerFound) {
+                            printerHost = resolved.getHost().getHostAddress();
+                            printerPort = resolved.getPort();
+                            printerFound = true;
+                            Log.d(TAG, "IPPS printer ready: " + printerHost + ":" + printerPort);
+                            pushPrinterStatus(true);
+                        }
+                    }
+                });
+            }
+
+            @Override
+            public void onServiceLost(NsdServiceInfo serviceInfo) {
+                // Only clear if no _ipp._tcp printer is active
+                if (printerFound && printerHost != null) return;
+                printerFound = false;
+                printerHost = null;
+                pushPrinterStatus(false);
+            }
+        };
+        try {
+            nsdManager.discoverServices("_ipps._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListenerIpps);
+        } catch (Exception e) {
+            Log.e(TAG, "IPPS discovery failed to start", e);
+        }
     }
 
     private void pushPrinterStatus(boolean connected) {
@@ -254,11 +309,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (nsdManager != null && discoveryListener != null) {
-            try {
-                nsdManager.stopServiceDiscovery(discoveryListener);
-            } catch (Exception e) {
-                // Ignore if not started
+        if (nsdManager != null) {
+            if (discoveryListener != null) {
+                try { nsdManager.stopServiceDiscovery(discoveryListener); } catch (Exception e) {}
+            }
+            if (discoveryListenerIpps != null) {
+                try { nsdManager.stopServiceDiscovery(discoveryListenerIpps); } catch (Exception e) {}
             }
         }
         if (webView != null) {
@@ -590,12 +646,112 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // ── Direct IPP for labels (WebView → PDF → IPP) ──
+    private void printLabelDirectIPP(int copies) {
+        if (printerHost == null) {
+            printViaSystemDialog(copies);
+            return;
+        }
+
+        try {
+            String jobName = "iPrint&Scan - " + (currentFileName != null ? currentFileName : "Label");
+            PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
+            File tempFile = File.createTempFile("print_", ".pdf", getCacheDir());
+
+            PrintAttributes attrs = new PrintAttributes.Builder()
+                .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                .setResolution(new PrintAttributes.Resolution("default", "default", 300, 300))
+                .setColorMode(PrintAttributes.COLOR_MODE_MONOCHROME)
+                .build();
+
+            adapter.onStart();
+            adapter.onLayout(null, attrs, new CancellationSignal(),
+                new PrintDocumentAdapter.LayoutResultCallback() {
+                    @Override
+                    public void onLayoutFinished(PrintDocumentInfo info, boolean changed) {
+                        try {
+                            ParcelFileDescriptor pfd = ParcelFileDescriptor.open(tempFile,
+                                ParcelFileDescriptor.MODE_READ_WRITE
+                                    | ParcelFileDescriptor.MODE_CREATE
+                                    | ParcelFileDescriptor.MODE_TRUNCATE);
+
+                            adapter.onWrite(new PageRange[]{PageRange.ALL_PAGES}, pfd,
+                                new CancellationSignal(),
+                                new PrintDocumentAdapter.WriteResultCallback() {
+                                    @Override
+                                    public void onWriteFinished(PageRange[] pages) {
+                                        new Thread(() -> {
+                                            try {
+                                                byte[] pdfData = readFileBytes(tempFile);
+                                                sendIPP(pdfData, copies);
+                                                runOnUiThread(() ->
+                                                    Toast.makeText(MainActivity.this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                                            } catch (Exception e) {
+                                                Log.e(TAG, "Label IPP failed", e);
+                                                runOnUiThread(() -> {
+                                                    Toast.makeText(MainActivity.this, "Direct print failed, using dialog", Toast.LENGTH_SHORT).show();
+                                                    printViaSystemDialog(copies);
+                                                });
+                                            } finally {
+                                                tempFile.delete();
+                                                adapter.onFinish();
+                                            }
+                                        }).start();
+                                    }
+
+                                    @Override
+                                    public void onWriteFailed(CharSequence error) {
+                                        Log.e(TAG, "Write failed: " + error);
+                                        tempFile.delete();
+                                        adapter.onFinish();
+                                        runOnUiThread(() -> printViaSystemDialog(copies));
+                                    }
+                                });
+                        } catch (Exception e) {
+                            Log.e(TAG, "Failed to open temp file", e);
+                            tempFile.delete();
+                            adapter.onFinish();
+                            runOnUiThread(() -> printViaSystemDialog(copies));
+                        }
+                    }
+
+                    @Override
+                    public void onLayoutFailed(CharSequence error) {
+                        Log.e(TAG, "Layout failed: " + error);
+                        tempFile.delete();
+                        adapter.onFinish();
+                        runOnUiThread(() -> printViaSystemDialog(copies));
+                    }
+                }, null);
+        } catch (Exception e) {
+            Log.e(TAG, "Label direct print setup failed", e);
+            printViaSystemDialog(copies);
+        }
+    }
+
+    private byte[] readFileBytes(File file) throws Exception {
+        FileInputStream fis = new FileInputStream(file);
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int len;
+        while ((len = fis.read(buf)) != -1) bos.write(buf, 0, len);
+        fis.close();
+        return bos.toByteArray();
+    }
+
     // ── JS Bridge ──
     public class WebAppInterface {
 
         @JavascriptInterface
         public void print(int copies) {
-            runOnUiThread(() -> printViaSystemDialog(copies));
+            runOnUiThread(() -> {
+                if (printerFound && printerHost != null) {
+                    // Delay briefly to let buildPrintArea DOM changes render
+                    webView.postDelayed(() -> printLabelDirectIPP(copies), 300);
+                } else {
+                    printViaSystemDialog(copies);
+                }
+            });
         }
 
         @JavascriptInterface
@@ -611,6 +767,17 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public boolean isPrinterConnected() {
             return printerFound;
+        }
+
+        @JavascriptInterface
+        public void openFilePicker() {
+            runOnUiThread(() -> {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/pdf", "image/*"});
+                startActivityForResult(intent, NATIVE_FILE_PICKER_REQUEST);
+            });
         }
     }
 }
