@@ -13,8 +13,37 @@ document.addEventListener('DOMContentLoaded', () => {
   var whiteoutCanvas = document.getElementById('whiteoutCanvas');
   var undoBtn = document.getElementById('undoBtn');
   var printArea = document.getElementById('printArea');
+  var printerDot = document.getElementById('printerDot');
+  var printerText = document.getElementById('printerText');
 
   var copies = 1;
+
+  // ── Printer status: green blink = connected, red blink = disconnected ──
+  function updatePrinterStatus(connected) {
+    if (connected) {
+      printerDot.classList.add('connected');
+      printerText.textContent = 'Brother HL-B2080DW';
+    } else {
+      printerDot.classList.remove('connected');
+      printerText.textContent = 'Printer not found';
+    }
+  }
+
+  function checkPrinter() {
+    // Android native bridge reports printer status
+    if (window.AndroidBridge && typeof window.AndroidBridge.isPrinterConnected === 'function') {
+      updatePrinterStatus(window.AndroidBridge.isPrinterConnected());
+    } else {
+      // Web fallback: use online/offline as proxy
+      updatePrinterStatus(navigator.onLine);
+    }
+  }
+
+  window.addEventListener('online', function() { checkPrinter(); });
+  window.addEventListener('offline', function() { checkPrinter(); });
+  // Poll every 5s for Android bridge updates
+  setInterval(checkPrinter, 5000);
+  checkPrinter();
 
   // ── Copies ──
   function updateCopiesUI() {
