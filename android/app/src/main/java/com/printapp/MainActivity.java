@@ -147,14 +147,16 @@ public class MainActivity extends AppCompatActivity {
 
         String jobName = "iPrint&Scan - " + (currentFileName != null ? currentFileName : "Label");
 
-        if (currentFileUri != null && "application/pdf".equals(currentMimeType)) {
-            // Print PDF directly
-            printManager.print(jobName, new PdfPrintAdapter(), null);
-        } else {
-            // Print WebView content (label preview or image)
-            PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
-            printManager.print(jobName, adapter, null);
-        }
+        // Default to A4 + Monochrome (Brother HL-B2080DW is mono laser)
+        // Android remembers the last-used printer, so Brother auto-selects after first use
+        PrintAttributes attributes = new PrintAttributes.Builder()
+            .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+            .setColorMode(PrintAttributes.COLOR_MODE_MONOCHROME)
+            .build();
+
+        // Always use WebView print adapter so whiteout marks + tiled layout are included
+        PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
+        printManager.print(jobName, adapter, attributes);
     }
 
     // Adapter to print PDF files directly

@@ -13,61 +13,78 @@
 </head>
 <body>
   <div class="app">
-    <!-- Header -->
+    <!-- Header: no title, back + edit(whiteout) buttons -->
     <header class="header">
       <button class="header-btn back-btn" aria-label="Back">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
           <path d="M15 18L9 12L15 6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
-      <h1 class="header-title">Print Preview</h1>
-      <div class="header-btn" style="visibility:hidden"></div>
+      <h1 class="header-title" id="headerTitle"></h1>
+      <button class="header-btn" id="editBtn" aria-label="White-out tool">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M20 20H7L3 16C2.4 15.4 2.4 14.4 3 13.8L13.8 3C14.4 2.4 15.4 2.4 16 3L21 8C21.6 8.6 21.6 9.6 21 10.2L11.2 20" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18 13L11 6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
     </header>
 
-    <!-- Print Preview Area -->
-    <main class="preview-area">
-      <div class="label-container">
-        <div class="shipping-label">
-          <!-- From -->
-          <div class="label-section from-section">
-            <div class="label-from-name">John Smith</div>
-            <div class="label-from-addr">123 Sender Street</div>
-            <div class="label-from-addr">New York, NY 10001</div>
-          </div>
+    <!-- Edit Mode Banner (hidden by default) -->
+    <div class="edit-banner" id="editBanner">
+      <span>White-out: drag to cover text</span>
+      <div class="edit-banner-actions">
+        <button class="banner-btn" id="undoBtn">Undo</button>
+        <button class="banner-btn done-btn" id="doneEditBtn">Done</button>
+      </div>
+    </div>
 
-          <!-- To -->
-          <div class="label-section to-section">
-            <div class="label-to-prefix">TO:</div>
-            <div class="label-to-name">Jane Doe</div>
-            <div class="label-to-addr">456 Receiver Ave, Apt 7B</div>
-            <div class="label-to-addr">Los Angeles, CA 90001</div>
-          </div>
-
-          <!-- Barcode area -->
-          <div class="label-section barcode-section">
-            <div class="barcode">
-              <div class="barcode-bars">
-                <span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span>
+    <!-- Preview Area -->
+    <main class="preview-area" id="previewArea">
+      <div class="preview-wrapper" id="previewWrapper">
+        <div class="label-container" id="labelContainer">
+          <div class="shipping-label">
+            <div class="label-section from-section">
+              <div class="label-from-name">John Smith</div>
+              <div class="label-from-addr">123 Sender Street</div>
+              <div class="label-from-addr">New York, NY 10001</div>
+            </div>
+            <div class="label-section to-section">
+              <div class="label-to-prefix">TO:</div>
+              <div class="label-to-name">Jane Doe</div>
+              <div class="label-to-addr">456 Receiver Ave, Apt 7B</div>
+              <div class="label-to-addr">Los Angeles, CA 90001</div>
+            </div>
+            <div class="label-section barcode-section">
+              <div class="barcode">
+                <div class="barcode-bars">
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                </div>
+                <div class="barcode-number">9400 1234 5678 9000 0000 00</div>
               </div>
-              <div class="barcode-number">9400 1234 5678 9000 0000 00</div>
+            </div>
+            <div class="label-section service-section">
+              <div class="service-badge">PRIORITY MAIL</div>
+              <div class="label-weight">Weight: 2.5 lbs</div>
             </div>
           </div>
-
-          <!-- Service / Priority -->
-          <div class="label-section service-section">
-            <div class="service-badge">PRIORITY MAIL</div>
-            <div class="label-weight">Weight: 2.5 lbs</div>
-          </div>
         </div>
+        <canvas id="whiteoutCanvas" class="whiteout-canvas"></canvas>
       </div>
     </main>
+
+    <!-- Zoom Controls -->
+    <div class="zoom-controls">
+      <button class="zoom-btn" id="zoomOut" aria-label="Zoom out">−</button>
+      <span class="zoom-level" id="zoomLevel">100%</span>
+      <button class="zoom-btn" id="zoomIn" aria-label="Zoom in">+</button>
+    </div>
 
     <!-- Printer Info Bar -->
     <div class="printer-bar" id="printerBar">
@@ -75,12 +92,11 @@
         <circle cx="12" cy="12" r="4" fill="#34c759"/>
         <circle cx="12" cy="12" r="8" stroke="#34c759" stroke-width="1.5" opacity="0.3"/>
       </svg>
-      <span class="printer-bar-text">Brother HL-B2080DW — select via WiFi when printing</span>
+      <span class="printer-bar-text">Brother HL-B2080DW (auto-selects on WiFi)</span>
     </div>
 
-    <!-- Settings Section -->
+    <!-- Settings: Layout + Copies -->
     <section class="settings-section">
-      <!-- Layout Setting -->
       <div class="setting-row">
         <div class="setting-label">
           <svg class="setting-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
@@ -95,6 +111,7 @@
           <select id="layoutSelect">
             <option value="1">1 per Sheet</option>
             <option value="2">2 per Sheet</option>
+            <option value="3">3 per Sheet</option>
             <option value="4">4 per Sheet</option>
           </select>
           <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -105,7 +122,6 @@
 
       <div class="setting-divider"></div>
 
-      <!-- Copies Setting -->
       <div class="setting-row">
         <div class="setting-label">
           <svg class="setting-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
@@ -134,6 +150,9 @@
       </button>
     </div>
   </div>
+
+  <!-- Hidden: tiled print area populated by JS before printing -->
+  <div id="printArea"></div>
 
   <script src="app.js"></script>
 </body>
