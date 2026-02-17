@@ -80,7 +80,43 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // File Handling API (Chrome 102+): triggered when app is opened via "Open with"
+  // ── Display file from base64 (sent by Android native bridge) ──
+  function displayFileFromBase64(name, mimeType, base64Data) {
+    loadedFileName = name;
+    const headerTitle = document.querySelector('.header-title');
+    headerTitle.textContent = name;
+    const dataUrl = 'data:' + mimeType + ';base64,' + base64Data;
+
+    if (mimeType.startsWith('image/')) {
+      labelContainer.innerHTML =
+        '<div style="padding:12px;text-align:center;">' +
+        '<img src="' + dataUrl + '" alt="' + name + '"' +
+        ' style="max-width:100%;max-height:50vh;border-radius:4px;object-fit:contain;">' +
+        '</div>';
+    } else if (mimeType === 'application/pdf') {
+      labelContainer.innerHTML =
+        '<div style="padding:0;display:flex;justify-content:center;">' +
+        '<embed src="' + dataUrl + '" type="application/pdf"' +
+        ' style="width:100%;height:55vh;border:none;border-radius:4px;">' +
+        '</div>';
+    } else {
+      labelContainer.innerHTML =
+        '<div style="padding:32px 16px;text-align:center;color:#555;">' +
+        '<div style="font-size:15px;font-weight:600;">' + name + '</div>' +
+        '</div>';
+    }
+  }
+
+  // Expose to Android native bridge
+  window.handleNativeFile = displayFileFromBase64;
+
+  // Check if Android already sent a file before JS loaded
+  if (window._pendingFile) {
+    displayFileFromBase64(window._pendingFile.name, window._pendingFile.type, window._pendingFile.data);
+    window._pendingFile = null;
+  }
+
+  // File Handling API (desktop Chrome): triggered when app is opened via "Open with"
   if ('launchQueue' in window) {
     window.launchQueue.setConsumer(async (launchParams) => {
       if (launchParams.files && launchParams.files.length > 0) {
