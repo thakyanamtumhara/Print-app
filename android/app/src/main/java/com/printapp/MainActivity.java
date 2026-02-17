@@ -37,6 +37,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -60,6 +61,7 @@ public class MainActivity extends AppCompatActivity {
     private volatile boolean printerFound = false;
     private volatile String printerHost = null;
     private volatile int printerPort = 631;
+    private volatile String printerResourcePath = null; // from NSD TXT "rp"
 
     // ── Pending file (read immediately, inject after page load) ──
     private boolean pageLoaded = false;
@@ -215,7 +217,17 @@ public class MainActivity extends AppCompatActivity {
                         printerHost = resolved.getHost().getHostAddress();
                         printerPort = resolved.getPort();
                         printerFound = true;
-                        Log.d(TAG, "Printer ready: " + printerHost + ":" + printerPort);
+                        // Extract resource path from TXT records
+                        Map<String, byte[]> attrs = resolved.getAttributes();
+                        if (attrs != null && attrs.containsKey("rp")) {
+                            byte[] rpBytes = attrs.get("rp");
+                            if (rpBytes != null) {
+                                printerResourcePath = new String(rpBytes);
+                                Log.d(TAG, "Printer rp: " + printerResourcePath);
+                            }
+                        }
+                        Log.d(TAG, "Printer ready: " + printerHost + ":" + printerPort
+                            + " path=" + printerResourcePath);
                         pushPrinterStatus(true);
                     }
                 });
@@ -270,7 +282,15 @@ public class MainActivity extends AppCompatActivity {
                             printerHost = resolved.getHost().getHostAddress();
                             printerPort = resolved.getPort();
                             printerFound = true;
-                            Log.d(TAG, "IPPS printer ready: " + printerHost + ":" + printerPort);
+                            Map<String, byte[]> attrs = resolved.getAttributes();
+                            if (attrs != null && attrs.containsKey("rp")) {
+                                byte[] rpBytes = attrs.get("rp");
+                                if (rpBytes != null) {
+                                    printerResourcePath = new String(rpBytes);
+                                }
+                            }
+                            Log.d(TAG, "IPPS printer ready: " + printerHost + ":" + printerPort
+                                + " path=" + printerResourcePath);
                             pushPrinterStatus(true);
                         }
                     }
@@ -463,8 +483,9 @@ public class MainActivity extends AppCompatActivity {
 
             } catch (Exception e) {
                 Log.e(TAG, "Direct print failed: " + e.getMessage(), e);
+                final String errMsg = e.getMessage();
                 runOnUiThread(() -> {
-                    Toast.makeText(this, "Direct print failed, using system dialog", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "IPP failed: " + errMsg, Toast.LENGTH_LONG).show();
                     printViaSystemDialog(copies);
                 });
             }
@@ -539,9 +560,38 @@ public class MainActivity extends AppCompatActivity {
     private void sendIPP(byte[] pdfData, int copies) throws Exception {
         String host = printerHost;
         int port = printerPort;
-        String printerUri = "ipp://" + host + ":" + port + "/ipp/print";
 
-        URL url = new URL("http://" + host + ":" + port + "/ipp/print");
+        // Build list of paths to try: NSD rp first, then common Brother paths
+        String[] pathsToTry;
+        if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
+            String rp = printerResourcePath.startsWith("/")
+                ? printerResourcePath : "/" + printerResourcePath;
+            pathsToTry = new String[]{ rp, "/ipp/print", "/ipp/printer", "/ipp" };
+        } else {
+            pathsToTry = new String[]{ "/ipp/print", "/ipp/printer", "/ipp" };
+        }
+
+        Exception lastError = null;
+        for (String path : pathsToTry) {
+            try {
+                trySendIPP(host, port, path, pdfData, copies);
+                Log.d(TAG, "IPP succeeded with path: " + path);
+                // Remember working path for next time
+                printerResourcePath = path;
+                return;
+            } catch (Exception e) {
+                Log.w(TAG, "IPP failed with path " + path + ": " + e.getMessage());
+                lastError = e;
+            }
+        }
+        throw lastError != null ? lastError : new Exception("All IPP paths failed");
+    }
+
+    private void trySendIPP(String host, int port, String path,
+                             byte[] pdfData, int copies) throws Exception {
+        String printerUri = "ipp://" + host + ":" + port + path;
+
+        URL url = new URL("http://" + host + ":" + port + path);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/ipp");
@@ -551,21 +601,28 @@ public class MainActivity extends AppCompatActivity {
 
         ByteArrayOutputStream ipp = new ByteArrayOutputStream();
 
+        // IPP version 2.0
         ipp.write(0x02); ipp.write(0x00);
+        // Operation: Print-Job (0x0002)
         ipp.write(0x00); ipp.write(0x02);
+        // Request ID
         ipp.write(0x00); ipp.write(0x00); ipp.write(0x00); ipp.write(0x01);
 
+        // Operation attributes
         ipp.write(0x01);
         writeIPPString(ipp, 0x47, "attributes-charset", "utf-8");
         writeIPPString(ipp, 0x48, "attributes-natural-language", "en");
         writeIPPString(ipp, 0x45, "printer-uri", printerUri);
         writeIPPString(ipp, 0x42, "requesting-user-name", "iPrintScan");
-        writeIPPString(ipp, 0x42, "job-name", "iPrint&Scan Print Job");
-        writeIPPString(ipp, 0x49, "document-format", "application/pdf");
+        writeIPPString(ipp, 0x42, "job-name", "iPrint&Scan Job");
+        // Use octet-stream so printer auto-detects format
+        writeIPPString(ipp, 0x49, "document-format", "application/octet-stream");
 
+        // Job attributes
         ipp.write(0x02);
         writeIPPInteger(ipp, 0x21, "copies", copies);
 
+        // End of attributes
         ipp.write(0x03);
 
         OutputStream out = conn.getOutputStream();
@@ -574,11 +631,60 @@ public class MainActivity extends AppCompatActivity {
         out.flush();
         out.close();
 
-        int code = conn.getResponseCode();
-        Log.d(TAG, "IPP response code: " + code);
+        int httpCode = conn.getResponseCode();
+        Log.d(TAG, "IPP HTTP code: " + httpCode + " for path: " + path);
 
-        if (code != 200) {
-            throw new Exception("IPP returned " + code);
+        // Read IPP response body to check actual status
+        InputStream respStream;
+        try {
+            respStream = conn.getInputStream();
+        } catch (Exception e) {
+            respStream = conn.getErrorStream();
+        }
+
+        if (respStream == null) {
+            if (httpCode != 200) {
+                throw new Exception("HTTP " + httpCode + ", no response body");
+            }
+            return;
+        }
+
+        ByteArrayOutputStream respBuf = new ByteArrayOutputStream();
+        byte[] buf = new byte[4096];
+        int n;
+        while ((n = respStream.read(buf)) != -1) {
+            respBuf.write(buf, 0, n);
+        }
+        respStream.close();
+        conn.disconnect();
+
+        byte[] resp = respBuf.toByteArray();
+        if (resp.length < 4) {
+            if (httpCode != 200) {
+                throw new Exception("HTTP " + httpCode + ", short IPP response");
+            }
+            return;
+        }
+
+        // Parse IPP status code from bytes 2-3 of response
+        int ippStatusCode = ((resp[2] & 0xFF) << 8) | (resp[3] & 0xFF);
+        Log.d(TAG, "IPP status code: 0x" + Integer.toHexString(ippStatusCode)
+            + " (" + ippStatusCode + ")");
+
+        // IPP successful statuses are 0x0000-0x00FF
+        if (ippStatusCode > 0x00FF) {
+            // Try to extract status-message from response for logging
+            String detail = "IPP error 0x" + Integer.toHexString(ippStatusCode);
+            try {
+                detail += " response bytes: ";
+                int logLen = Math.min(resp.length, 200);
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < logLen; i++) {
+                    sb.append(String.format("%02x ", resp[i]));
+                }
+                Log.e(TAG, "IPP error response: " + sb.toString());
+            } catch (Exception ignored) {}
+            throw new Exception(detail);
         }
     }
 
