@@ -1,4 +1,4 @@
-var CACHE_NAME = 'iprint-v8';
+var CACHE_NAME = 'iprint-v9';
 var ASSETS = [
   '/Print-app/',
   '/Print-app/index.html',

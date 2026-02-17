@@ -152,9 +152,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawStart(e) {
-    e.preventDefault();
     // Two fingers → pinch zoom
     if (e.touches && e.touches.length >= 2) {
+      e.preventDefault();
       isPinching = true;
       currentStroke = null;
       pinchStartDist = getPinchDist(e.touches);
@@ -163,17 +163,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     // Don't start drawing right after a pinch ends
     if (isPinching) return;
-    // One finger → draw
+    // One finger → record start (don't preventDefault yet, let browser decide scroll vs draw)
     var p = pos(e);
     currentStroke = { pts: [p], brush: getBrush() };
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, getBrush(), 0, Math.PI * 2);
-    ctx.fill();
   }
 
   function drawMove(e) {
-    e.preventDefault();
+    if (!e.touches) e.preventDefault();
     // Pinch zoom
     if (e.touches && e.touches.length >= 2 && isPinching) {
       var dist = getPinchDist(e.touches);
@@ -193,6 +189,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!currentStroke) return;
     var p = pos(e);
     currentStroke.pts.push(p);
+    // Paint initial dot on first move
+    if (currentStroke.pts.length === 2) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(currentStroke.pts[0].x, currentStroke.pts[0].y, currentStroke.brush, 0, Math.PI * 2);
+      ctx.fill();
+    }
     var prev = currentStroke.pts[currentStroke.pts.length - 2];
     var br = currentStroke.brush;
     ctx.strokeStyle = '#FFFFFF';
@@ -210,17 +213,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.touches && e.touches.length === 1 && isPinching) return;
     if (e.touches && e.touches.length === 0) isPinching = false;
     if (currentStroke && currentStroke.pts.length > 0) {
+      // If it was just a tap (no move), paint the dot now
+      if (currentStroke.pts.length === 1) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(currentStroke.pts[0].x, currentStroke.pts[0].y, currentStroke.brush, 0, Math.PI * 2);
+        ctx.fill();
+      }
       strokes.push(currentStroke);
       updateUndoBtn();
     }
     currentStroke = null;
   }
 
+  function drawCancel() {
+    // Browser took over (scrolling) — discard partial stroke
+    currentStroke = null;
+    isPinching = false;
+  }
+
   // Touch
   whiteoutCanvas.addEventListener('touchstart', drawStart, { passive: false });
-  whiteoutCanvas.addEventListener('touchmove', drawMove, { passive: false });
+  whiteoutCanvas.addEventListener('touchmove', drawMove, { passive: true });
   whiteoutCanvas.addEventListener('touchend', drawEnd, { passive: false });
-  whiteoutCanvas.addEventListener('touchcancel', drawEnd);
+  whiteoutCanvas.addEventListener('touchcancel', drawCancel);
   // Mouse (desktop)
   whiteoutCanvas.addEventListener('mousedown', drawStart);
   whiteoutCanvas.addEventListener('mousemove', drawMove);
