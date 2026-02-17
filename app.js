@@ -389,7 +389,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  var isPrinting = false;
   printBtn.addEventListener('click', function() {
+    if (isPrinting) return;
+    isPrinting = true;
+    printBtn.disabled = true;
     try {
       buildPrintArea();
       if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
@@ -416,6 +420,11 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e2) {
         console.error('Fallback print also failed: ' + e2.message);
       }
+    } finally {
+      setTimeout(function() {
+        isPrinting = false;
+        printBtn.disabled = false;
+      }, 1500);
     }
   });
 
