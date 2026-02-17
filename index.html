@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>iPrint&Scan</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <button class="header-btn back-btn" aria-label="Back">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M15 18L9 12L15 6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <h1 class="header-title">Print Preview</h1>
+      <div class="header-btn" style="visibility:hidden"></div>
+    </header>
+
+    <!-- Print Preview Area -->
+    <main class="preview-area">
+      <div class="label-container">
+        <div class="shipping-label">
+          <!-- From -->
+          <div class="label-section from-section">
+            <div class="label-from-name">John Smith</div>
+            <div class="label-from-addr">123 Sender Street</div>
+            <div class="label-from-addr">New York, NY 10001</div>
+          </div>
+
+          <!-- To -->
+          <div class="label-section to-section">
+            <div class="label-to-prefix">TO:</div>
+            <div class="label-to-name">Jane Doe</div>
+            <div class="label-to-addr">456 Receiver Ave, Apt 7B</div>
+            <div class="label-to-addr">Los Angeles, CA 90001</div>
+          </div>
+
+          <!-- Barcode area -->
+          <div class="label-section barcode-section">
+            <div class="barcode">
+              <div class="barcode-bars">
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div class="barcode-number">9400 1234 5678 9000 0000 00</div>
+            </div>
+          </div>
+
+          <!-- Service / Priority -->
+          <div class="label-section service-section">
+            <div class="service-badge">PRIORITY MAIL</div>
+            <div class="label-weight">Weight: 2.5 lbs</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Settings Section -->
+    <section class="settings-section">
+      <!-- Layout Setting -->
+      <div class="setting-row">
+        <div class="setting-label">
+          <svg class="setting-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="7" height="7" rx="1" stroke="#555" stroke-width="1.8"/>
+            <rect x="14" y="3" width="7" height="7" rx="1" stroke="#555" stroke-width="1.8"/>
+            <rect x="3" y="14" width="7" height="7" rx="1" stroke="#555" stroke-width="1.8"/>
+            <rect x="14" y="14" width="7" height="7" rx="1" stroke="#555" stroke-width="1.8"/>
+          </svg>
+          <span>Layout</span>
+        </div>
+        <div class="setting-control">
+          <select id="layoutSelect">
+            <option value="1">1 per Sheet</option>
+            <option value="2">2 per Sheet</option>
+            <option value="4">4 per Sheet</option>
+          </select>
+          <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M6 9L12 15L18 9" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="setting-divider"></div>
+
+      <!-- Copies Setting -->
+      <div class="setting-row">
+        <div class="setting-label">
+          <svg class="setting-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="8" y="2" width="12" height="16" rx="1.5" stroke="#555" stroke-width="1.8"/>
+            <path d="M4 6H5.5C5.78 6 6 6.22 6 6.5V19.5C6 19.78 6.22 20 6.5 20H16" stroke="#555" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <span>Copies</span>
+        </div>
+        <div class="setting-control copies-control">
+          <button class="copies-btn minus" id="copiesMinus" aria-label="Decrease copies">−</button>
+          <span class="copies-value" id="copiesValue">1</span>
+          <button class="copies-btn plus" id="copiesPlus" aria-label="Increase copies">+</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Print Button -->
+    <div class="print-btn-container">
+      <button class="print-btn" id="printBtn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style="margin-right:8px">
+          <path d="M6 9V2H18V9" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M6 18H4C2.9 18 2 17.1 2 16V11C2 9.9 2.9 9 4 9H20C21.1 9 22 9.9 22 11V16C22 17.1 21.1 18 20 18H18" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="6" y="14" width="12" height="8" rx="1" stroke="#fff" stroke-width="2"/>
+        </svg>
+        Print
+      </button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
