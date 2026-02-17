@@ -1,5 +1,5 @@
-const CACHE_NAME = 'iprint-v1';
-const ASSETS = [
+var CACHE_NAME = 'iprint-v2';
+var ASSETS = [
   '/Print-app/',
   '/Print-app/index.html',
   '/Print-app/styles.css',
@@ -9,26 +9,41 @@ const ASSETS = [
 ];
 
 // Install – cache app shell
-self.addEventListener('install', (e) => {
+self.addEventListener('install', function(e) {
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then(function(cache) { return cache.addAll(ASSETS); })
   );
   self.skipWaiting();
 });
 
-// Activate – clean old caches
-self.addEventListener('activate', (e) => {
+// Activate – delete ALL old caches
+self.addEventListener('activate', function(e) {
   e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    caches.keys().then(function(keys) {
+      return Promise.all(
+        keys.filter(function(k) { return k !== CACHE_NAME; })
+            .map(function(k) { return caches.delete(k); })
+      );
+    })
   );
   self.clients.claim();
 });
 
-// Fetch – serve from cache, fallback to network
-self.addEventListener('fetch', (e) => {
+// Fetch – network first, fall back to cache
+// This ensures deploys are picked up immediately
+self.addEventListener('fetch', function(e) {
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    fetch(e.request)
+      .then(function(response) {
+        // Update cache with fresh copy
+        var clone = response.clone();
+        caches.open(CACHE_NAME).then(function(cache) {
+          cache.put(e.request, clone);
+        });
+        return response;
+      })
+      .catch(function() {
+        return caches.match(e.request);
+      })
   );
 });
