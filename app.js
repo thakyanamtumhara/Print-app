@@ -30,18 +30,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function checkPrinter() {
-    // Android native bridge reports printer status
     if (window.AndroidBridge && typeof window.AndroidBridge.isPrinterConnected === 'function') {
+      // Android app can actually detect the printer on the network
       updatePrinterStatus(window.AndroidBridge.isPrinterConnected());
     } else {
-      // Web fallback: use online/offline as proxy
-      updatePrinterStatus(navigator.onLine);
+      // Web browser cannot detect a printer — default to disconnected (red)
+      updatePrinterStatus(false);
     }
   }
 
-  window.addEventListener('online', function() { checkPrinter(); });
-  window.addEventListener('offline', function() { checkPrinter(); });
-  // Poll every 5s for Android bridge updates
+  // Android bridge can call this to push status updates
+  window.updatePrinterConnected = function(connected) {
+    updatePrinterStatus(connected);
+  };
+
+  // Poll every 5s (only useful when Android bridge is present)
   setInterval(checkPrinter, 5000);
   checkPrinter();
 
