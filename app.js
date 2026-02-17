@@ -3,6 +3,11 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
+// ── Global error handler (visible in logcat via console.error) ──
+window.onerror = function(msg, url, line, col, err) {
+  console.error('JS Error: ' + msg + ' at ' + url + ':' + line + ':' + col);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   var copiesValue = document.getElementById('copiesValue');
   var copiesMinus = document.getElementById('copiesMinus');
@@ -76,17 +81,20 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function updatePreviewLayout() {
-    if (contentType !== 'pdf' || pageImages.length === 0) return;
+    if (contentType === 'label' || pageImages.length === 0) return;
     var layout = parseInt(layoutSelect.value, 10);
     labelContainer.innerHTML = '';
+
+    // For images: duplicate the single image to fill the layout
+    var pages = (contentType === 'image') ? Array(layout).fill(pageImages[0]) : pageImages;
 
     if (layout === 1) {
       // 1 per sheet: show pages vertically (normal scroll)
       var container = document.createElement('div');
       container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px';
-      for (var i = 0; i < pageImages.length; i++) {
+      for (var i = 0; i < pages.length; i++) {
         var img = document.createElement('img');
-        img.src = pageImages[i];
+        img.src = pages[i];
         img.style.cssText = 'width:100%;display:block;border-radius:4px;background:#fff';
         container.appendChild(img);
       }
@@ -96,16 +104,16 @@ document.addEventListener('DOMContentLoaded', () => {
       var container = document.createElement('div');
       container.className = 'preview-sheets';
 
-      var totalSheets = Math.ceil(pageImages.length / layout);
-      for (var i = 0; i < pageImages.length; i += layout) {
+      var totalSheets = Math.ceil(pages.length / layout);
+      for (var i = 0; i < pages.length; i += layout) {
         var sheet = document.createElement('div');
         sheet.className = 'preview-sheet preview-layout-' + layout;
 
-        for (var j = 0; j < layout && (i + j) < pageImages.length; j++) {
+        for (var j = 0; j < layout && (i + j) < pages.length; j++) {
           var tile = document.createElement('div');
           tile.className = 'preview-tile';
           var img = document.createElement('img');
-          img.src = pageImages[i + j];
+          img.src = pages[i + j];
           tile.appendChild(img);
           sheet.appendChild(tile);
         }
@@ -381,18 +389,32 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   printBtn.addEventListener('click', function() {
-    buildPrintArea();
-    if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
-      if ((contentType === 'pdf' || contentType === 'image') && pageImages.length > 0) {
-        // Direct IPP print — no system dialog
-        var layout = parseInt(layoutSelect.value, 10);
-        window.AndroidBridge.printDirect(JSON.stringify(pageImages), layout, copies);
+    try {
+      buildPrintArea();
+      if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
+        if ((contentType === 'pdf' || contentType === 'image') && pageImages.length > 0) {
+          // Direct IPP print — no system dialog
+          var layout = parseInt(layoutSelect.value, 10);
+          window.AndroidBridge.printDirect(JSON.stringify(pageImages), layout, copies);
+        } else {
+          // Label/HTML — fallback to system dialog
+          window.AndroidBridge.print(copies);
+        }
       } else {
-        // Label/HTML — fallback to system dialog
-        window.AndroidBridge.print(copies);
+        window.print();
       }
-    } else {
-      window.print();
+    } catch (err) {
+      console.error('Print failed: ' + err.message);
+      // Try system dialog as last resort
+      try {
+        if (window.AndroidBridge) {
+          window.AndroidBridge.print(copies);
+        } else {
+          window.print();
+        }
+      } catch (e2) {
+        console.error('Fallback print also failed: ' + e2.message);
+      }
     }
   });
 

@@ -190,6 +190,7 @@ html, body {
 
 .printer-dot.connected {
   background: #34c759;
+  animation: none;
 }
 
 .printer-dot.neutral {

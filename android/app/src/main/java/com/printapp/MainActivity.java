@@ -21,6 +21,7 @@ import android.print.PrintManager;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.util.Log;
+import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -60,9 +61,11 @@ public class MainActivity extends AppCompatActivity {
     private volatile String printerHost = null;
     private volatile int printerPort = 631;
 
-    // ── Page load state ──
+    // ── Pending file (read immediately, inject after page load) ──
     private boolean pageLoaded = false;
-    private Uri pendingFileUri = null;
+    private String pendingFileName = null;
+    private String pendingMimeType = null;
+    private String pendingBase64Data = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,6 +73,9 @@ public class MainActivity extends AppCompatActivity {
 
         webView = new WebView(this);
         setContentView(webView);
+
+        // Enable remote debugging so errors are visible in chrome://inspect
+        WebView.setWebContentsDebuggingEnabled(true);
 
         // Configure WebView
         WebSettings settings = webView.getSettings();
@@ -82,15 +88,22 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 pageLoaded = true;
-                // If a file was opened before the page loaded, inject it now
-                if (pendingFileUri != null) {
-                    loadFileIntoWebView(pendingFileUri);
-                    pendingFileUri = null;
+                // If a file was opened before the page loaded, inject the pre-read data now
+                if (pendingBase64Data != null) {
+                    injectFileData(pendingFileName, pendingMimeType, pendingBase64Data);
+                    pendingFileName = null;
+                    pendingMimeType = null;
+                    pendingBase64Data = null;
                 }
+            }
+
+            @Override
+            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                Log.e(TAG, "WebView error: " + description + " (" + errorCode + ") at " + failingUrl);
             }
         });
 
-        // WebChromeClient with file picker support
+        // WebChromeClient with file picker + console logging
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(WebView webView,
@@ -110,6 +123,13 @@ public class MainActivity extends AppCompatActivity {
                     return false;
                 }
                 return true;
+            }
+
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage cm) {
+                Log.d(TAG, "JS " + cm.messageLevel() + ": " + cm.message()
+                    + " (line " + cm.lineNumber() + " of " + cm.sourceId() + ")");
+                return super.onConsoleMessage(cm);
             }
         });
 
@@ -147,8 +167,6 @@ public class MainActivity extends AppCompatActivity {
 
     // ══════════════════════════════════════════
     // ── NSD Printer Discovery ──
-    // Finds printers advertising _ipp._tcp on local network.
-    // Resolves IP + port for direct IPP printing.
     // ══════════════════════════════════════════
     private void startPrinterDiscovery() {
         nsdManager = (NsdManager) getSystemService(NSD_SERVICE);
@@ -163,11 +181,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onServiceFound(NsdServiceInfo serviceInfo) {
                 String name = serviceInfo.getServiceName();
-                Log.d(TAG, "Printer found: " + name);
-                printerFound = true;
-                pushPrinterStatus(true);
+                Log.d(TAG, "Printer found: " + name + " — resolving IP...");
 
-                // Resolve to get IP and port for direct IPP printing
+                // Resolve to get IP and port before marking as connected
                 nsdManager.resolveService(serviceInfo, new NsdManager.ResolveListener() {
                     @Override
                     public void onResolveFailed(NsdServiceInfo si, int errorCode) {
@@ -178,7 +194,9 @@ public class MainActivity extends AppCompatActivity {
                     public void onServiceResolved(NsdServiceInfo resolved) {
                         printerHost = resolved.getHost().getHostAddress();
                         printerPort = resolved.getPort();
-                        Log.d(TAG, "Printer resolved: " + printerHost + ":" + printerPort);
+                        printerFound = true;
+                        Log.d(TAG, "Printer ready: " + printerHost + ":" + printerPort);
+                        pushPrinterStatus(true);
                     }
                 });
             }
@@ -208,13 +226,12 @@ public class MainActivity extends AppCompatActivity {
             }
         };
 
-        // _ipp._tcp = Internet Printing Protocol (most WiFi printers including Brother)
         nsdManager.discoverServices("_ipp._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListener);
     }
 
     private void pushPrinterStatus(boolean connected) {
         runOnUiThread(() -> {
-            String js = "javascript:if(window.updatePrinterConnected)window.updatePrinterConnected(" + connected + ")";
+            String js = "if(window.updatePrinterConnected)window.updatePrinterConnected(" + connected + ")";
             webView.evaluateJavascript(js, null);
         });
     }
@@ -228,6 +245,9 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) {
                 // Ignore if not started
             }
+        }
+        if (webView != null) {
+            webView.destroy();
         }
     }
 
@@ -250,42 +270,67 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (fileUri != null) {
+            // Grant read permission for content:// URIs
+            try {
+                grantUriPermission(getPackageName(), fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception e) {
+                // Some URIs don't support this
+            }
+
             currentFileUri = fileUri;
             currentMimeType = getContentResolver().getType(fileUri);
             currentFileName = getFileName(fileUri);
+
+            // Read file data NOW while URI permission is valid
+            String[] fileData = readFileToBase64(fileUri);
+            if (fileData == null) return;
+
+            String fileName = fileData[0];
+            String mimeType = fileData[1];
+            String base64Data = fileData[2];
+
             if (pageLoaded) {
-                // Page already loaded (e.g. app was open, new file shared)
-                loadFileIntoWebView(fileUri);
+                // Page already loaded — inject immediately
+                injectFileData(fileName, mimeType, base64Data);
             } else {
-                // App just launched — wait for onPageFinished
-                pendingFileUri = fileUri;
+                // Page still loading — store data, inject in onPageFinished
+                pendingFileName = fileName;
+                pendingMimeType = mimeType;
+                pendingBase64Data = base64Data;
             }
         }
     }
 
     private String getFileName(Uri uri) {
-        String name = "label";
-        Cursor cursor = getContentResolver().query(uri, null, null, null, null);
-        if (cursor != null && cursor.moveToFirst()) {
-            int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-            if (nameIndex >= 0) {
-                name = cursor.getString(nameIndex);
+        String name = "document";
+        Cursor cursor = null;
+        try {
+            cursor = getContentResolver().query(uri, null, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameIndex >= 0) {
+                    name = cursor.getString(nameIndex);
+                }
             }
-            cursor.close();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to get file name", e);
+        } finally {
+            if (cursor != null) cursor.close();
         }
         return name;
     }
 
-    private void loadFileIntoWebView(Uri uri) {
+    // Read file from URI and return [fileName, mimeType, base64Data], or null on error
+    private String[] readFileToBase64(Uri uri) {
         try {
             String mimeType = getContentResolver().getType(uri);
             String fileName = getFileName(uri);
 
             InputStream inputStream = getContentResolver().openInputStream(uri);
-            if (inputStream == null) return;
+            if (inputStream == null) return null;
 
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            byte[] data = new byte[4096];
+            byte[] data = new byte[8192];
             int bytesRead;
             while ((bytesRead = inputStream.read(data)) != -1) {
                 buffer.write(data, 0, bytesRead);
@@ -293,34 +338,43 @@ public class MainActivity extends AppCompatActivity {
             inputStream.close();
 
             String base64Data = Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP);
+            String safeMimeType = mimeType != null ? mimeType : "application/octet-stream";
 
-            final String jsFileName = fileName.replace("'", "\\'");
-            final String jsMimeType = mimeType != null ? mimeType : "application/octet-stream";
-
-            webView.post(() -> {
-                String js = "javascript:(function() {" +
-                    "if (window.handleNativeFile) {" +
-                    "  window.handleNativeFile('" + jsFileName + "', '" + jsMimeType + "', '" + base64Data + "');" +
-                    "} else {" +
-                    "  window._pendingFile = {name:'" + jsFileName + "', type:'" + jsMimeType + "', data:'" + base64Data + "'};" +
-                    "}" +
-                    "})()";
-                webView.evaluateJavascript(js, null);
-            });
-
+            return new String[]{ fileName, safeMimeType, base64Data };
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e(TAG, "Failed to read file: " + e.getMessage(), e);
+            return null;
         }
+    }
+
+    // Inject pre-read file data into the WebView
+    private void injectFileData(String fileName, String mimeType, String base64Data) {
+        final String jsFileName = fileName.replace("'", "\\'").replace("\\", "\\\\");
+
+        webView.post(() -> {
+            String js = "(function() {" +
+                "if (window.handleNativeFile) {" +
+                "  window.handleNativeFile('" + jsFileName + "', '" + mimeType + "', '" + base64Data + "');" +
+                "} else {" +
+                "  window._pendingFile = {name:'" + jsFileName + "', type:'" + mimeType + "', data:'" + base64Data + "'};" +
+                "}" +
+                "})()";
+            webView.evaluateJavascript(js, null);
+        });
+    }
+
+    // Legacy method for file picker path (page is always loaded by then)
+    private void loadFileIntoWebView(Uri uri) {
+        String[] fileData = readFileToBase64(uri);
+        if (fileData == null) return;
+        injectFileData(fileData[0], fileData[1], fileData[2]);
     }
 
     // ══════════════════════════════════════════
     // ── DIRECT IPP PRINTING ──
-    // Sends PDF directly to printer via IPP protocol.
-    // No system dialog — one-tap print.
     // ══════════════════════════════════════════
     private void printDirectIPP(String pagesJson, int layout, int copies) {
         if (printerHost == null) {
-            // Printer IP not resolved, fall back to system dialog
             runOnUiThread(() -> {
                 Toast.makeText(this, "Printer not ready, using system dialog", Toast.LENGTH_SHORT).show();
                 printViaSystemDialog(copies);
@@ -330,17 +384,13 @@ public class MainActivity extends AppCompatActivity {
 
         new Thread(() -> {
             try {
-                // 1. Parse page images from JSON
                 JSONArray arr = new JSONArray(pagesJson);
                 String[] pageDataUrls = new String[arr.length()];
                 for (int i = 0; i < arr.length(); i++) {
                     pageDataUrls[i] = arr.getString(i);
                 }
 
-                // 2. Create PDF from page images with layout
                 byte[] pdfData = createPdfFromImages(pageDataUrls, layout);
-
-                // 3. Send PDF to printer via IPP
                 sendIPP(pdfData, copies);
 
                 runOnUiThread(() ->
@@ -348,7 +398,6 @@ public class MainActivity extends AppCompatActivity {
 
             } catch (Exception e) {
                 Log.e(TAG, "Direct print failed: " + e.getMessage(), e);
-                // Fallback to system dialog
                 runOnUiThread(() -> {
                     Toast.makeText(this, "Direct print failed, using system dialog", Toast.LENGTH_SHORT).show();
                     printViaSystemDialog(copies);
@@ -357,15 +406,13 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // Create a PDF with pages arranged according to layout
     private byte[] createPdfFromImages(String[] imageDataUrls, int layout) throws Exception {
         PdfDocument pdf = new PdfDocument();
 
-        // A4 at 72 dpi
         int pageWidth = 595;
         int pageHeight = 842;
-        int padding = 14;   // ~5mm
-        int gap = 6;        // ~2mm
+        int padding = 14;
+        int gap = 6;
 
         int cols, rows;
         switch (layout) {
@@ -383,7 +430,7 @@ public class MainActivity extends AppCompatActivity {
                 new PdfDocument.PageInfo.Builder(pageWidth, pageHeight, i / layout + 1).create();
             PdfDocument.Page page = pdf.startPage(pageInfo);
             Canvas canvas = page.getCanvas();
-            canvas.drawColor(0xFFFFFFFF); // white background
+            canvas.drawColor(0xFFFFFFFF);
 
             for (int j = 0; j < layout && (i + j) < imageDataUrls.length; j++) {
                 int col = j % cols;
@@ -391,7 +438,6 @@ public class MainActivity extends AppCompatActivity {
                 int x = padding + col * (cellWidth + gap);
                 int y = padding + row * (cellHeight + gap);
 
-                // Decode data URL → bitmap
                 String dataUrl = imageDataUrls[i + j];
                 int commaIdx = dataUrl.indexOf(',');
                 if (commaIdx < 0) continue;
@@ -400,7 +446,6 @@ public class MainActivity extends AppCompatActivity {
                 Bitmap bmp = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.length);
                 if (bmp == null) continue;
 
-                // Scale to fit cell, maintaining aspect ratio
                 float scale = Math.min(
                     (float) cellWidth / bmp.getWidth(),
                     (float) cellHeight / bmp.getHeight()
@@ -408,7 +453,6 @@ public class MainActivity extends AppCompatActivity {
                 int sw = (int) (bmp.getWidth() * scale);
                 int sh = (int) (bmp.getHeight() * scale);
 
-                // Center in cell
                 int ox = x + (cellWidth - sw) / 2;
                 int oy = y + (cellHeight - sh) / 2;
 
@@ -427,7 +471,6 @@ public class MainActivity extends AppCompatActivity {
         return out.toByteArray();
     }
 
-    // Send PDF to printer via IPP (HTTP POST)
     private void sendIPP(byte[] pdfData, int copies) throws Exception {
         String host = printerHost;
         int port = printerPort;
@@ -441,18 +484,13 @@ public class MainActivity extends AppCompatActivity {
         conn.setConnectTimeout(10000);
         conn.setReadTimeout(30000);
 
-        // Build IPP Print-Job request
         ByteArrayOutputStream ipp = new ByteArrayOutputStream();
 
-        // Version 2.0
         ipp.write(0x02); ipp.write(0x00);
-        // Operation: Print-Job (0x0002)
         ipp.write(0x00); ipp.write(0x02);
-        // Request ID
         ipp.write(0x00); ipp.write(0x00); ipp.write(0x00); ipp.write(0x01);
 
-        // ── Operation attributes ──
-        ipp.write(0x01); // operation-attributes-tag
+        ipp.write(0x01);
         writeIPPString(ipp, 0x47, "attributes-charset", "utf-8");
         writeIPPString(ipp, 0x48, "attributes-natural-language", "en");
         writeIPPString(ipp, 0x45, "printer-uri", printerUri);
@@ -460,14 +498,11 @@ public class MainActivity extends AppCompatActivity {
         writeIPPString(ipp, 0x42, "job-name", "iPrint&Scan Print Job");
         writeIPPString(ipp, 0x49, "document-format", "application/pdf");
 
-        // ── Job attributes ──
-        ipp.write(0x02); // job-attributes-tag
+        ipp.write(0x02);
         writeIPPInteger(ipp, 0x21, "copies", copies);
 
-        // End of attributes
         ipp.write(0x03);
 
-        // Write header + PDF document data
         OutputStream out = conn.getOutputStream();
         out.write(ipp.toByteArray());
         out.write(pdfData);
@@ -482,7 +517,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // IPP helper: write a string attribute
     private void writeIPPString(ByteArrayOutputStream out, int tag, String name, String value) throws Exception {
         out.write(tag);
         byte[] nb = name.getBytes("UTF-8");
@@ -495,14 +529,13 @@ public class MainActivity extends AppCompatActivity {
         out.write(vb);
     }
 
-    // IPP helper: write an integer attribute
     private void writeIPPInteger(ByteArrayOutputStream out, int tag, String name, int value) throws Exception {
         out.write(tag);
         byte[] nb = name.getBytes("UTF-8");
         out.write((nb.length >> 8) & 0xFF);
         out.write(nb.length & 0xFF);
         out.write(nb);
-        out.write(0x00); out.write(0x04); // value length = 4
+        out.write(0x00); out.write(0x04);
         out.write((value >> 24) & 0xFF);
         out.write((value >> 16) & 0xFF);
         out.write((value >> 8) & 0xFF);
@@ -512,7 +545,11 @@ public class MainActivity extends AppCompatActivity {
     // ── Fallback: Android system print dialog ──
     private void printViaSystemDialog(int copies) {
         PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
-        if (printManager == null) return;
+        if (printManager == null) {
+            Log.e(TAG, "PrintManager is null");
+            Toast.makeText(this, "Print service not available", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         String jobName = "iPrint&Scan - " + (currentFileName != null ? currentFileName : "Label");
         PrintAttributes attributes = new PrintAttributes.Builder()
@@ -520,8 +557,13 @@ public class MainActivity extends AppCompatActivity {
             .setColorMode(PrintAttributes.COLOR_MODE_MONOCHROME)
             .build();
 
-        PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
-        printManager.print(jobName, adapter, attributes);
+        try {
+            PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
+            printManager.print(jobName, adapter, attributes);
+        } catch (Exception e) {
+            Log.e(TAG, "System print failed: " + e.getMessage(), e);
+            Toast.makeText(this, "Print failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override
@@ -533,18 +575,16 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ── JS Bridge: web app calls these methods ──
+    // ── JS Bridge ──
     public class WebAppInterface {
 
         @JavascriptInterface
         public void print(int copies) {
-            // Fallback for label/HTML content — uses system dialog
             runOnUiThread(() -> printViaSystemDialog(copies));
         }
 
         @JavascriptInterface
         public void printDirect(String pagesJson, int layout, int copies) {
-            // Direct IPP print for PDFs/images — no dialog
             printDirectIPP(pagesJson, layout, copies);
         }
 
