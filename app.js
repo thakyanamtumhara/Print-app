@@ -648,7 +648,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pdf.getPage(num).then(function(page) {
           var containerWidth = labelContainer.offsetWidth - 16;
           var vp = page.getViewport({ scale: 1 });
-          var scale = (containerWidth / vp.width) * 2; // 2x for print quality
+          var scale = Math.min(2480 / vp.width, 5); // 300 DPI (A4) for print quality
           var scaled = page.getViewport({ scale: scale });
 
           var canvas = document.createElement('canvas');
@@ -658,7 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
           container.appendChild(canvas);
 
           page.render({ canvasContext: canvas.getContext('2d'), viewport: scaled }).promise.then(function() {
-            pageImages.push(canvas.toDataURL('image/png'));
+            pageImages.push(canvas.toDataURL('image/jpeg', 0.95));
             if (num === pdf.numPages) {
               initSelectedPages();
               updatePreviewLayout();

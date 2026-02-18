@@ -780,15 +780,37 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < imageDataUrls.length; i += layout) {
             Log.d(TAG, "createJpegPages: creating sheet starting at image " + i);
             jsLog("createJpegPages: sheet starting at image " + i);
-            Bitmap pageBitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.RGB_565);
+
+            // For layout=1, detect landscape source and use landscape page dimensions
+            int sheetW = pageWidth;
+            int sheetH = pageHeight;
+            if (layout == 1) {
+                String peekUrl = imageDataUrls[i];
+                int peekComma = peekUrl.indexOf(',');
+                if (peekComma >= 0) {
+                    byte[] peekBytes = Base64.decode(peekUrl.substring(peekComma + 1), Base64.DEFAULT);
+                    BitmapFactory.Options opts = new BitmapFactory.Options();
+                    opts.inJustDecodeBounds = true;
+                    BitmapFactory.decodeByteArray(peekBytes, 0, peekBytes.length, opts);
+                    if (opts.outWidth > opts.outHeight) {
+                        sheetW = pageHeight;  // 3508 (landscape)
+                        sheetH = pageWidth;   // 2480
+                        jsLog("createJpegPages: sheet " + i + " LANDSCAPE " + sheetW + "x" + sheetH);
+                    }
+                }
+            }
+            int curCellW = (sheetW - 2 * padding - (cols - 1) * gap) / cols;
+            int curCellH = (sheetH - 2 * padding - (rows - 1) * gap) / rows;
+
+            Bitmap pageBitmap = Bitmap.createBitmap(sheetW, sheetH, Bitmap.Config.RGB_565);
             Canvas canvas = new Canvas(pageBitmap);
             canvas.drawColor(0xFFFFFFFF);
 
             for (int j = 0; j < layout && (i + j) < imageDataUrls.length; j++) {
                 int col = j % cols;
                 int row = j / cols;
-                int x = padding + col * (cellWidth + gap);
-                int y = padding + row * (cellHeight + gap);
+                int x = padding + col * (curCellW + gap);
+                int y = padding + row * (curCellH + gap);
 
                 String dataUrl = imageDataUrls[i + j];
                 int commaIdx = dataUrl.indexOf(',');
@@ -810,14 +832,14 @@ public class MainActivity extends AppCompatActivity {
                 jsLog("createJpegPages: image[" + (i + j) + "] decoded " + bmp.getWidth() + "x" + bmp.getHeight());
 
                 float scale = Math.min(
-                    (float) cellWidth / bmp.getWidth(),
-                    (float) cellHeight / bmp.getHeight()
+                    (float) curCellW / bmp.getWidth(),
+                    (float) curCellH / bmp.getHeight()
                 );
                 int sw = (int) (bmp.getWidth() * scale);
                 int sh = (int) (bmp.getHeight() * scale);
 
-                int ox = x + (cellWidth - sw) / 2;
-                int oy = y + (cellHeight - sh) / 2;
+                int ox = x + (curCellW - sw) / 2;
+                int oy = y + (curCellH - sh) / 2;
 
                 Bitmap scaled = Bitmap.createScaledBitmap(bmp, sw, sh, true);
                 canvas.drawBitmap(scaled, ox, oy, null);
@@ -826,7 +848,7 @@ public class MainActivity extends AppCompatActivity {
             }
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            pageBitmap.compress(Bitmap.CompressFormat.JPEG, 92, out);
+            pageBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out);
             pageBitmap.recycle();
             Log.d(TAG, "createJpegPages: sheet " + (pages.size() + 1) + " JPEG size=" + out.size() + " bytes");
             jsLog("createJpegPages: sheet " + (pages.size() + 1) + " JPEG size=" + out.size() + " bytes");
@@ -845,8 +867,16 @@ public class MainActivity extends AppCompatActivity {
         if (bmp == null) throw new Exception("Failed to decode JPEG for PDF conversion");
 
         // A4 in PostScript points (1 pt = 1/72 inch)
-        int pageWidthPt = 595;
-        int pageHeightPt = 842;
+        // Auto-detect landscape: if image is wider than tall, use landscape A4
+        int pageWidthPt, pageHeightPt;
+        if (bmp.getWidth() > bmp.getHeight()) {
+            pageWidthPt = 842;  // landscape
+            pageHeightPt = 595;
+            jsLog("jpegToPdf: LANDSCAPE page " + pageWidthPt + "x" + pageHeightPt + "pt");
+        } else {
+            pageWidthPt = 595;  // portrait
+            pageHeightPt = 842;
+        }
 
         PdfDocument pdf = new PdfDocument();
         PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
@@ -1013,6 +1043,7 @@ public class MainActivity extends AppCompatActivity {
         // PJL header — ENTER LANGUAGE = PDF tells printer to interpret data as PDF
         String pjlHeader = "\u001B%-12345X@PJL\r\n"
             + "@PJL SET PAPER = A4\r\n"
+            + "@PJL SET FIT TO PAGE = ON\r\n"
             + "@PJL JOB NAME = \"Print\"\r\n"
             + "@PJL ENTER LANGUAGE = PDF\r\n";
 
@@ -1103,6 +1134,7 @@ public class MainActivity extends AppCompatActivity {
         // Job attributes
         ipp.write(0x02);
         writeIPPInteger(ipp, 0x21, "copies", copies);
+        writeIPPString(ipp, 0x44, "print-scaling", "fit");
 
         // End of attributes
         ipp.write(0x03);
