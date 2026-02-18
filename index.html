@@ -10,6 +10,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="apple-touch-icon" href="icon-192.png">
+  <!-- DEBUG: force .app visible (revert to proven min-height:100vh from before 79714b2) -->
+  <style>.app{min-height:100vh!important;overflow:visible!important}</style>
 </head>
 <body>
   <div class="app">
@@ -128,9 +130,33 @@
   <!-- Hidden: tiled print area -->
   <div id="printArea"></div>
 
+  <!-- DEBUG: inline diagnostics (position:fixed so visible even if .app is broken) -->
+  <script>
+  (function(){
+    var a=document.querySelector('.app');
+    var h=window.innerHeight||document.documentElement.clientHeight||screen.availHeight||0;
+    if(a)a.style.minHeight=h+'px';
+    var d=document.createElement('div');
+    d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:6px 10px;font:bold 12px monospace;z-index:99999';
+    d.id='_dbg';
+    function u(){
+      var a2=document.querySelector('.app');
+      var pa=document.getElementById('previewArea');
+      var bb=document.querySelector('.bottom-bar');
+      d.textContent='iH:'+window.innerHeight+' cH:'+document.documentElement.clientHeight
+        +' app:'+(a2?a2.offsetHeight+'x'+a2.offsetWidth:'NO')
+        +' pa:'+(pa?pa.offsetHeight:'NO')
+        +' bb:'+(bb?bb.offsetHeight:'NO');
+    }
+    u();
+    document.body.appendChild(d);
+    setInterval(u,2000);
+  })();
+  </script>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    try{pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}catch(e){}
   </script>
   <script src="app.js"></script>
 </body>
