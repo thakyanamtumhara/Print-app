@@ -10,8 +10,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <!-- DEBUG: force .app visible (revert to proven min-height:100vh from before 79714b2) -->
-  <style>.app{min-height:100vh!important;overflow:visible!important}</style>
+  <!-- DEBUG: colored borders to see element positions -->
+  <style>
+    .app{border:4px solid red!important}
+    .preview-area{background:#ffd!important;border:3px solid green!important}
+    .bottom-bar{border:3px solid blue!important}
+    .label-container{border:3px solid orange!important}
+  </style>
 </head>
 <body>
   <div class="app">
@@ -135,22 +140,28 @@
   (function(){
     var a=document.querySelector('.app');
     var h=window.innerHeight||document.documentElement.clientHeight||screen.availHeight||0;
-    if(a)a.style.minHeight=h+'px';
+    if(a){a.style.minHeight=h+'px';a.style.overflow='visible';}
+    var errCount=0;var errMsg='';
+    var prevOnerror=window.onerror;
+    window.onerror=function(m){errCount++;errMsg=String(m).substring(0,60);if(prevOnerror)prevOnerror.apply(this,arguments);};
     var d=document.createElement('div');
-    d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:6px 10px;font:bold 12px monospace;z-index:99999';
+    d.style.cssText='position:fixed;top:0;left:0;right:0;background:red;color:#fff;padding:6px 8px;font:bold 11px monospace;z-index:99999;word-break:break-all';
     d.id='_dbg';
     function u(){
       var a2=document.querySelector('.app');
       var pa=document.getElementById('previewArea');
       var bb=document.querySelector('.bottom-bar');
-      d.textContent='iH:'+window.innerHeight+' cH:'+document.documentElement.clientHeight
+      var lc=document.getElementById('labelContainer');
+      d.textContent='iH:'+window.innerHeight
         +' app:'+(a2?a2.offsetHeight+'x'+a2.offsetWidth:'NO')
         +' pa:'+(pa?pa.offsetHeight:'NO')
-        +' bb:'+(bb?bb.offsetHeight:'NO');
+        +' bb:'+(bb?bb.offsetHeight:'NO')
+        +' lc:'+(lc?lc.offsetHeight+'['+lc.innerHTML.length+']':'NO')
+        +' err:'+errCount+(errMsg?' '+errMsg:'');
     }
     u();
     document.body.appendChild(d);
-    setInterval(u,2000);
+    setInterval(u,1500);
   })();
   </script>
 
