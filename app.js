@@ -9,11 +9,15 @@ window.onerror = function(msg, url, line, col, err) {
 };
 
 // ── Fix app height for Android WebView ──
-// CSS height:100%/100vh can fail in WebView. Set pixels directly.
+// CSS height units can fail in WebView. Set pixels + overflow:hidden together
+// so content is never clipped before height is established.
 (function() {
   function fixHeight() {
     var el = document.querySelector('.app');
-    if (el) el.style.height = window.innerHeight + 'px';
+    if (el) {
+      var h = window.innerHeight || 0;
+      if (h > 0) { el.style.height = h + 'px'; el.style.overflow = 'hidden'; }
+    }
   }
   fixHeight();
   window.addEventListener('resize', fixHeight);
