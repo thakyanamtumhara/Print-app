@@ -9,9 +9,6 @@ window.onerror = function(msg, url, line, col, err) {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  var copiesValue = document.getElementById('copiesValue');
-  var copiesMinus = document.getElementById('copiesMinus');
-  var copiesPlus = document.getElementById('copiesPlus');
   var printBtn = document.getElementById('printBtn');
   var layoutSelect = document.getElementById('layoutSelect');
   var labelContainer = document.getElementById('labelContainer');
@@ -25,7 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
   var openFileBtn = document.getElementById('openFileBtn');
   var fileInput = document.getElementById('fileInput');
 
-  var copies = 1;
   var pageImages = [];     // data-URL per PDF/image page (for printing)
   var contentType = 'label'; // 'label' | 'pdf' | 'image'
   var selectedPages = [];  // boolean array — true = page selected for printing
@@ -76,20 +72,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-
-  // ── Copies ──
-  function updateCopiesUI() {
-    copiesValue.textContent = copies;
-    copiesMinus.disabled = copies <= 1;
-    copiesPlus.disabled = copies >= 99;
-  }
-
-  copiesMinus.addEventListener('click', function() {
-    if (copies > 1) { copies--; updateCopiesUI(); }
-  });
-  copiesPlus.addEventListener('click', function() {
-    if (copies < 99) { copies++; updateCopiesUI(); }
-  });
 
   // ── Layout change → update in-app preview ──
   layoutSelect.addEventListener('change', function() {
@@ -473,7 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var isPrinting = false;
   printBtn.addEventListener('click', function() {
     console.log('[PRINT-DEBUG] Print button clicked. isPrinting=' + isPrinting
-      + ' contentType=' + contentType + ' copies=' + copies
+      + ' contentType=' + contentType
       + ' pageImages.length=' + pageImages.length
       + ' isAndroid=' + !!(window.AndroidBridge && window.AndroidBridge.isAndroid()));
 
@@ -504,29 +486,18 @@ document.addEventListener('DOMContentLoaded', () => {
         var allSelected = selectedImgs.length === pageImages.length;
         if (layout === 1 && allSelected && contentType === 'pdf'
             && window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf()) {
-          // Send original PDF bytes directly — only when 1-per-sheet and all pages selected
-          console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirectPdf() copies=' + copies);
-          window.AndroidBridge.printDirectPdf(copies);
+          console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirectPdf()');
+          window.AndroidBridge.printDirectPdf(1);
         } else if ((contentType === 'pdf' || contentType === 'image') && selectedImgs.length > 0) {
           console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirect() layout=' + layout
-            + ' copies=' + copies + ' pages=' + selectedImgs.length);
-          window.AndroidBridge.printDirect(JSON.stringify(selectedImgs), layout, copies);
+            + ' pages=' + selectedImgs.length);
+          window.AndroidBridge.printDirect(JSON.stringify(selectedImgs), layout, 1);
         } else {
-          console.log('[PRINT-DEBUG] Calling AndroidBridge.print() copies=' + copies);
-          window.AndroidBridge.print(copies);
+          console.log('[PRINT-DEBUG] Calling AndroidBridge.print()');
+          window.AndroidBridge.print(1);
         }
       } else {
-        // Browser path: duplicate sheets to handle copies
-        if (copies > 1) {
-          console.log('[PRINT-DEBUG] Browser path: duplicating sheets for ' + copies + ' copies');
-          var sheetsHtml = printArea.innerHTML;
-          var allCopies = '';
-          for (var c = 0; c < copies; c++) {
-            allCopies += sheetsHtml;
-          }
-          printArea.innerHTML = allCopies;
-        }
-        console.log('[PRINT-DEBUG] Calling window.print() (browser path) copies=' + copies);
+        console.log('[PRINT-DEBUG] Calling window.print() (browser path)');
         window.print();
       }
     } catch (err) {
@@ -534,7 +505,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         if (window.AndroidBridge) {
           console.log('[PRINT-DEBUG] Trying fallback: AndroidBridge.print()');
-          window.AndroidBridge.print(copies);
+          window.AndroidBridge.print(1);
         } else {
           console.log('[PRINT-DEBUG] Trying fallback: window.print()');
           window.print();
@@ -756,6 +727,4 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-
-  updateCopiesUI();
 });

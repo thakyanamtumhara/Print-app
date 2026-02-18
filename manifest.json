@@ -1,6 +1,6 @@
 {
-  "name": "iPrint & Scan",
-  "short_name": "iPrint&Scan",
+  "name": "Print",
+  "short_name": "Print",
   "description": "Print shipping labels easily",
   "start_url": "/Print-app/",
   "scope": "/Print-app/",
