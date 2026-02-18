@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var layoutSelect = document.getElementById('layoutSelect');
   var labelContainer = document.getElementById('labelContainer');
   var previewWrapper = document.getElementById('previewWrapper');
+  var previewArea = document.getElementById('previewArea');
   var whiteoutCanvas = document.getElementById('whiteoutCanvas');
   var undoBtn = document.getElementById('undoBtn');
   var eraserToggle = document.getElementById('eraserToggle');
@@ -196,6 +197,30 @@ document.addEventListener('DOMContentLoaded', () => {
     previewWrapper.style.marginBottom = extraH + 'px';
   }
 
+  // ── Pinch zoom on preview area (works when eraser is OFF) ──
+  // When eraser is ON, canvas captures touches instead (with stopPropagation).
+  previewArea.addEventListener('touchstart', function(e) {
+    if (e.touches.length >= 2) {
+      e.preventDefault();
+      isPinching = true;
+      pinchStartDist = getPinchDist(e.touches);
+      pinchStartZoom = zoom;
+    }
+  }, { passive: false });
+
+  previewArea.addEventListener('touchmove', function(e) {
+    if (e.touches.length >= 2 && isPinching) {
+      e.preventDefault();
+      var dist = getPinchDist(e.touches);
+      zoom = Math.max(1, Math.min(5, pinchStartZoom * (dist / pinchStartDist)));
+      applyZoom();
+    }
+  }, { passive: false });
+
+  previewArea.addEventListener('touchend', function(e) {
+    if (e.touches.length < 2) isPinching = false;
+  });
+
   // ══════════════════════════════════════════
   // ── WHITE-OUT CANVAS (always active) ──
   // One finger = draw white. Two fingers = pinch zoom.
@@ -257,9 +282,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawStart(e) {
-    // Two fingers → pinch zoom
+    // Two fingers → pinch zoom (handled here when eraser is on)
     if (e.touches && e.touches.length >= 2) {
       e.preventDefault();
+      e.stopPropagation(); // prevent previewArea from double-handling
       isPinching = true;
       currentStroke = null;
       pinchStartDist = getPinchDist(e.touches);
@@ -277,6 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Pinch zoom — prevent scroll during pinch
     if (e.touches && e.touches.length >= 2 && isPinching) {
       e.preventDefault();
+      e.stopPropagation(); // prevent previewArea from double-handling
       var dist = getPinchDist(e.touches);
       zoom = Math.max(1, Math.min(5, pinchStartZoom * (dist / pinchStartDist)));
       applyZoom();
@@ -375,11 +402,13 @@ document.addEventListener('DOMContentLoaded', () => {
     eraserEnabled = !eraserEnabled;
     if (eraserEnabled) {
       whiteoutCanvas.style.pointerEvents = 'auto';
+      whiteoutCanvas.style.touchAction = 'none'; // we handle all gestures in JS
       whiteoutCanvas.style.cursor = 'crosshair';
       eraserToggle.classList.add('active');
       thicknessBar.style.display = 'flex';
     } else {
       whiteoutCanvas.style.pointerEvents = 'none';
+      whiteoutCanvas.style.touchAction = 'pan-y';
       whiteoutCanvas.style.cursor = 'default';
       eraserToggle.classList.remove('active');
       thicknessBar.style.display = 'none';
@@ -641,6 +670,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function displayFile(file) {
     clearWhiteout();
+    zoom = 1;
+    applyZoom();
     if (file.type.startsWith('image/')) {
       contentType = 'image';
       pageImages = [];
@@ -672,6 +703,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function displayFileFromBase64(name, mimeType, base64Data) {
     clearWhiteout();
+    zoom = 1;
+    applyZoom();
     if (mimeType.startsWith('image/')) {
       contentType = 'image';
       var dataUrl = 'data:' + mimeType + ';base64,' + base64Data;
