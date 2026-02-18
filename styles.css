@@ -420,6 +420,10 @@ html, body {
   grid-template-rows: 1fr 1fr;
 }
 
+.preview-sheet.preview-sheet-landscape {
+  aspect-ratio: 297 / 210;
+}
+
 .preview-tile {
   overflow: hidden;
   border-radius: 3px;
@@ -461,6 +465,12 @@ html, body {
   cursor: pointer;
   background: #fff;
   flex-shrink: 0;
+}
+
+.page-thumb.page-thumb-landscape {
+  aspect-ratio: 297 / 210;
+  width: 74px;
+  min-width: 74px;
 }
 
 .page-thumb:not(.selected) {

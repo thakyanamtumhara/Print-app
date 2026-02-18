@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var fileInput = document.getElementById('fileInput');
 
   var pageImages = [];     // data-URL per PDF/image page (for printing)
+  var pageOrientations = []; // 'landscape' | 'portrait' per page
   var contentType = 'label'; // 'label' | 'pdf' | 'image'
   var selectedPages = [];  // boolean array — true = page selected for printing
   var eraserEnabled = false;
@@ -123,8 +124,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Build selected-only list for N-up preview
     var selPages = [];
+    var selOrients = [];
     for (var i = 0; i < allPages.length; i++) {
-      if (selectedPages[i] !== false) selPages.push(allPages[i]);
+      if (selectedPages[i] !== false) {
+        selPages.push(allPages[i]);
+        selOrients.push(pageOrientations[i] || 'portrait');
+      }
     }
 
     var container = document.createElement('div');
@@ -136,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
       strip.className = 'page-selector-strip';
       for (var i = 0; i < allPages.length; i++) {
         var thumb = document.createElement('div');
-        thumb.className = 'page-thumb' + (selectedPages[i] !== false ? ' selected' : '');
+        thumb.className = 'page-thumb' + (selectedPages[i] !== false ? ' selected' : '') + (pageOrientations[i] === 'landscape' ? ' page-thumb-landscape' : '');
         thumb.setAttribute('data-page', i);
         var thumbImg = document.createElement('img');
         thumbImg.src = allPages[i];
@@ -162,6 +167,10 @@ document.addEventListener('DOMContentLoaded', () => {
     for (var i = 0; i < selPages.length; i += layout) {
       var sheet = document.createElement('div');
       sheet.className = 'preview-sheet preview-layout-' + layout;
+      // Show landscape pages in landscape orientation in preview
+      if (layout === 1 && selOrients[i] === 'landscape') {
+        sheet.classList.add('preview-sheet-landscape');
+      }
 
       for (var j = 0; j < layout && (i + j) < selPages.length; j++) {
         var tile = document.createElement('div');
@@ -525,7 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
       for (var si = 0; si < pageImages.length; si++) {
         if (selectedPages[si] !== false) selectedImgs.push(pageImages[si]);
       }
-      console.log('[PRINT-DEBUG] selectedImgs=' + selectedImgs.length + '/' + pageImages.length + ' layout=' + layout);
+      console.log('[PRINT-DEBUG] selectedImgs=' + selectedImgs.length + '/' + pageImages.length + ' layout=' + layout + ' orientations=' + JSON.stringify(pageOrientations));
       buildPrintArea(selectedImgs, layout);
       if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
         var allSelected = selectedImgs.length === pageImages.length;
@@ -637,6 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderPdfPages(pdfData) {
     labelContainer.innerHTML = '';
     pageImages = [];
+    pageOrientations = [];
     contentType = 'pdf';
     var container = document.createElement('div');
     container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px';
@@ -648,7 +658,8 @@ document.addEventListener('DOMContentLoaded', () => {
         pdf.getPage(num).then(function(page) {
           var containerWidth = labelContainer.offsetWidth - 16;
           var vp = page.getViewport({ scale: 1 });
-          var scale = Math.min(2480 / vp.width, 5); // 300 DPI (A4) for print quality
+          var scale = Math.min(4960 / vp.width, 10); // 600 DPI (A4) for max print quality
+          console.log('[RENDER] Page ' + num + ': vp=' + vp.width.toFixed(0) + 'x' + vp.height.toFixed(0) + ' scale=' + scale.toFixed(2));
           var scaled = page.getViewport({ scale: scale });
 
           var canvas = document.createElement('canvas');
@@ -658,7 +669,10 @@ document.addEventListener('DOMContentLoaded', () => {
           container.appendChild(canvas);
 
           page.render({ canvasContext: canvas.getContext('2d'), viewport: scaled }).promise.then(function() {
-            pageImages.push(canvas.toDataURL('image/jpeg', 0.95));
+            var orient = scaled.width > scaled.height ? 'landscape' : 'portrait';
+            pageOrientations.push(orient);
+            console.log('[RENDER] Page ' + num + ': canvas=' + canvas.width + 'x' + canvas.height + ' orient=' + orient);
+            pageImages.push(canvas.toDataURL('image/jpeg', 0.98));
             if (num === pdf.numPages) {
               initSelectedPages();
               updatePreviewLayout();
@@ -691,6 +705,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (file.type.startsWith('image/')) {
       contentType = 'image';
       pageImages = [];
+      pageOrientations = [];
       // Read as data URL for printing
       var imgReader = new FileReader();
       imgReader.onload = function() { pageImages = [imgReader.result]; initSelectedPages(); };
@@ -709,6 +724,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       contentType = 'label';
       pageImages = [];
+      pageOrientations = [];
       labelContainer.innerHTML =
         '<div style="padding:32px 16px;text-align:center;color:#555">' +
         '<div style="font-size:15px;font-weight:600">' + file.name + '</div>' +
@@ -723,6 +739,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applyZoom();
     if (mimeType.startsWith('image/')) {
       contentType = 'image';
+      pageOrientations = [];
       var dataUrl = 'data:' + mimeType + ';base64,' + base64Data;
       pageImages = [dataUrl];
       initSelectedPages();
@@ -735,6 +752,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       contentType = 'label';
       pageImages = [];
+      pageOrientations = [];
       labelContainer.innerHTML =
         '<div style="padding:32px 16px;text-align:center;color:#555">' +
         '<div style="font-size:15px;font-weight:600">' + name + '</div>' +

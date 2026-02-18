@@ -598,7 +598,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         jsLog("=== printOriginalPdf START === pdfSize=" + pdfBytes.length
-            + " host=" + printerHost + ":" + printerPort);
+            + " host=" + printerHost + ":" + printerPort
+            + " resourcePath=" + printerResourcePath);
 
         new Thread(() -> {
             try {
@@ -756,11 +757,11 @@ public class MainActivity extends AppCompatActivity {
         jsLog("createJpegPages: images=" + imageDataUrls.length + " layout=" + layout);
         List<byte[]> pages = new ArrayList<>();
 
-        // A4 at 300 DPI
-        int pageWidth = 2480;
-        int pageHeight = 3508;
-        int padding = 58;
-        int gap = 25;
+        // A4 at 600 DPI (max quality for Brother HL-B2080DW)
+        int pageWidth = 4960;
+        int pageHeight = 7016;
+        int padding = 116;
+        int gap = 50;
 
         int cols, rows;
         switch (layout) {
@@ -775,7 +776,7 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "createJpegPages: page=" + pageWidth + "x" + pageHeight
             + " cell=" + cellWidth + "x" + cellHeight
             + " grid=" + cols + "x" + rows);
-        jsLog("createJpegPages: grid=" + cols + "x" + rows + " cell=" + cellWidth + "x" + cellHeight);
+        jsLog("createJpegPages: 600dpi page=" + pageWidth + "x" + pageHeight + " grid=" + cols + "x" + rows + " cell=" + cellWidth + "x" + cellHeight);
 
         for (int i = 0; i < imageDataUrls.length; i += layout) {
             Log.d(TAG, "createJpegPages: creating sheet starting at image " + i);
@@ -848,7 +849,7 @@ public class MainActivity extends AppCompatActivity {
             }
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            pageBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out);
+            pageBitmap.compress(Bitmap.CompressFormat.JPEG, 98, out);
             pageBitmap.recycle();
             Log.d(TAG, "createJpegPages: sheet " + (pages.size() + 1) + " JPEG size=" + out.size() + " bytes");
             jsLog("createJpegPages: sheet " + (pages.size() + 1) + " JPEG size=" + out.size() + " bytes");
@@ -1302,8 +1303,8 @@ public class MainActivity extends AppCompatActivity {
                             + " contentHeight=" + webView.getContentHeight());
 
                         // Render WebView content to a high-resolution JPEG
-                        int bmpWidth = 2480;   // A4 at 300 DPI
-                        int bmpHeight = 3508;
+                        int bmpWidth = 4960;   // A4 at 600 DPI
+                        int bmpHeight = 7016;
 
                         Log.d(TAG, "printLabelDirectIPP: creating bitmap " + bmpWidth + "x" + bmpHeight);
                         Bitmap pageBitmap = Bitmap.createBitmap(
