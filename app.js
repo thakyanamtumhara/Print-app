@@ -8,6 +8,18 @@ window.onerror = function(msg, url, line, col, err) {
   console.error('JS Error: ' + msg + ' at ' + url + ':' + line + ':' + col);
 };
 
+// ── Fix app height for Android WebView ──
+// CSS height:100%/100vh can fail in WebView. Set pixels directly.
+(function() {
+  function fixHeight() {
+    var el = document.querySelector('.app');
+    if (el) el.style.height = window.innerHeight + 'px';
+  }
+  fixHeight();
+  window.addEventListener('resize', fixHeight);
+  window.addEventListener('load', fixHeight);
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   var printBtn = document.getElementById('printBtn');
   var layoutSelect = document.getElementById('layoutSelect');
