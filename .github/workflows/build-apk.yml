@@ -41,21 +41,21 @@ jobs:
       - name: Rename APK with date
         run: |
           DATE=$(date +'%Y-%m-%d')
-          cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/iPrintScan-$DATE.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/Print-$DATE.apk
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iPrintScan-APK
-          path: android/app/build/outputs/apk/debug/iPrintScan-*.apk
+          name: Print-APK
+          path: android/app/build/outputs/apk/debug/Print-*.apk
           retention-days: 90
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: iPrintScan Build #${{ github.run_number }}
-          files: android/app/build/outputs/apk/debug/iPrintScan-*.apk
+          name: Print Build #${{ github.run_number }}
+          files: android/app/build/outputs/apk/debug/Print-*.apk
           body: |
             Automatic build from commit ${{ github.sha }}
 

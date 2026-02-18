@@ -49,7 +49,7 @@ import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String TAG = "iPrintScan";
+    private static final String TAG = "Print";
     private static final int FILE_CHOOSER_REQUEST = 100;
     private static final int NATIVE_FILE_PICKER_REQUEST = 200;
     private SwipeRefreshLayout swipeRefreshLayout;
@@ -95,15 +95,12 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Wrap WebView in SwipeRefreshLayout for pull-to-refresh
+        // WebView without pull-to-refresh (SwipeRefreshLayout disabled)
         swipeRefreshLayout = new SwipeRefreshLayout(this);
+        swipeRefreshLayout.setEnabled(false);
         webView = new WebView(this);
         swipeRefreshLayout.addView(webView);
         setContentView(swipeRefreshLayout);
-
-        swipeRefreshLayout.setOnRefreshListener(() -> {
-            webView.reload();
-        });
 
         // Enable remote debugging so errors are visible in chrome://inspect
         WebView.setWebContentsDebuggingEnabled(true);
@@ -115,16 +112,10 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
 
-        // Only allow swipe-to-refresh when WebView is scrolled to the top
-        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
-            swipeRefreshLayout.setEnabled(scrollY == 0);
-        });
-
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
                 pageLoaded = true;
-                swipeRefreshLayout.setRefreshing(false);
                 // If a file was opened before the page loaded, inject the pre-read data now
                 if (pendingBase64Data != null) {
                     injectFileData(pendingFileName, pendingMimeType, pendingBase64Data);
@@ -1022,7 +1013,7 @@ public class MainActivity extends AppCompatActivity {
         // PJL header — ENTER LANGUAGE = PDF tells printer to interpret data as PDF
         String pjlHeader = "\u001B%-12345X@PJL\r\n"
             + "@PJL SET PAPER = A4\r\n"
-            + "@PJL JOB NAME = \"iPrintScan\"\r\n"
+            + "@PJL JOB NAME = \"Print\"\r\n"
             + "@PJL ENTER LANGUAGE = PDF\r\n";
 
         String pjlFooter = "\u001B%-12345X@PJL EOJ\r\n\u001B%-12345X";
@@ -1105,8 +1096,8 @@ public class MainActivity extends AppCompatActivity {
         writeIPPString(ipp, 0x47, "attributes-charset", "utf-8");
         writeIPPString(ipp, 0x48, "attributes-natural-language", "en");
         writeIPPString(ipp, 0x45, "printer-uri", printerUri);
-        writeIPPString(ipp, 0x42, "requesting-user-name", "iPrintScan");
-        writeIPPString(ipp, 0x42, "job-name", "iPrint&Scan Job");
+        writeIPPString(ipp, 0x42, "requesting-user-name", "Print");
+        writeIPPString(ipp, 0x42, "job-name", "Print Job");
         writeIPPString(ipp, 0x49, "document-format", documentFormat);
 
         // Job attributes
@@ -1217,7 +1208,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String jobName = "iPrint&Scan - " + (currentFileName != null ? currentFileName : "Label");
+        String jobName = "Print - " + (currentFileName != null ? currentFileName : "Label");
         Log.d(TAG, "printViaSystemDialog: jobName=" + jobName);
 
         PrintAttributes attributes = new PrintAttributes.Builder()

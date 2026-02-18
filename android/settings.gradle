@@ -1,2 +1,2 @@
-rootProject.name = 'iPrintScan'
+rootProject.name = 'Print'
 include ':app'
