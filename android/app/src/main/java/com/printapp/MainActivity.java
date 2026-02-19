@@ -620,26 +620,7 @@ public class MainActivity extends AppCompatActivity {
 
                 Exception lastError = null;
 
-                // Strategy 1: Send PDF via IPP on port 631 (most reliable for PDF)
-                if (port631Open) {
-                    String ippPath = "/ipp/print";
-                    if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
-                        ippPath = printerResourcePath.startsWith("/")
-                            ? printerResourcePath : "/" + printerResourcePath;
-                    }
-                    try {
-                        trySendIPP(host, 631, ippPath, pdfBytes, copies, "application/pdf");
-                        jsLog("=== printOriginalPdf SUCCESS via IPP 631 ===");
-                        runOnUiThread(() ->
-                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
-                        return;
-                    } catch (Exception e) {
-                        jsLog("printOriginalPdf: IPP 631 FAILED: " + e.getMessage());
-                        lastError = e;
-                    }
-                }
-
-                // Strategy 2: Send PDF directly via port 9100 with PJL ENTER LANGUAGE = PDF
+                // Strategy 1: Port 9100 with PJL (PRIMARY for Brother — natively handles PDF)
                 if (port9100Open) {
                     try {
                         trySendRaw9100_pdf(host, pdfBytes);
@@ -654,7 +635,7 @@ public class MainActivity extends AppCompatActivity {
 
                     Thread.sleep(1000);
 
-                    // Strategy 2B: Raw PDF without PJL
+                    // Strategy 1B: Raw PDF without PJL
                     try {
                         trySendRaw9100_pdfNoPjl(host, pdfBytes);
                         jsLog("=== printOriginalPdf SUCCESS via port 9100 (raw) ===");
@@ -665,6 +646,55 @@ public class MainActivity extends AppCompatActivity {
                         jsLog("printOriginalPdf: port 9100 raw FAILED: " + e.getMessage());
                         lastError = e;
                     }
+                }
+
+                // Strategy 2: IPP on port 631 with application/pdf
+                if (port631Open) {
+                    String ippPath = "/ipp/print";
+                    if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
+                        ippPath = printerResourcePath.startsWith("/")
+                            ? printerResourcePath : "/" + printerResourcePath;
+                    }
+                    try {
+                        trySendIPP(host, 631, ippPath, pdfBytes, copies, "application/pdf");
+                        jsLog("=== printOriginalPdf SUCCESS via IPP 631 ===");
+                        runOnUiThread(() ->
+                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                        return;
+                    } catch (Exception e) {
+                        jsLog("printOriginalPdf: IPP 631 pdf FAILED: " + e.getMessage());
+                        lastError = e;
+                    }
+
+                    // Strategy 2B: IPP with application/octet-stream (some printers auto-detect)
+                    try {
+                        trySendIPP(host, 631, ippPath, pdfBytes, copies, "application/octet-stream");
+                        jsLog("=== printOriginalPdf SUCCESS via IPP 631 octet-stream ===");
+                        runOnUiThread(() ->
+                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                        return;
+                    } catch (Exception e) {
+                        jsLog("printOriginalPdf: IPP 631 octet-stream FAILED: " + e.getMessage());
+                        lastError = e;
+                    }
+                }
+
+                // Retry: wait 2s, re-probe port 9100, try once more
+                jsLog("printOriginalPdf: all strategies failed, retrying port 9100 in 2s...");
+                Thread.sleep(2000);
+                if (isPortOpen(host, 9100, 3000)) {
+                    try {
+                        trySendRaw9100_pdf(host, pdfBytes);
+                        jsLog("=== printOriginalPdf SUCCESS via port 9100 RETRY ===");
+                        runOnUiThread(() ->
+                            Toast.makeText(this, "Sent to printer", Toast.LENGTH_SHORT).show());
+                        return;
+                    } catch (Exception e) {
+                        jsLog("printOriginalPdf: port 9100 RETRY FAILED: " + e.getMessage());
+                        lastError = e;
+                    }
+                } else {
+                    jsLog("printOriginalPdf: port 9100 still CLOSED on retry");
                 }
 
                 throw lastError != null ? lastError : new Exception("All print attempts failed");
