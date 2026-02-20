@@ -1015,12 +1015,64 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      // ── Composite N-up sheets when layout > 1 ──
+      var layout = parseInt(layoutSelect.value, 10) || 1;
+      console.log('[EXPORT] layout=' + layout);
+      if (layout > 1 && (contentType === 'pdf' || contentType === 'image')) {
+        var pages = (contentType === 'image')
+          ? Array(layout).fill(selectedImgs[0])
+          : selectedImgs;
+        var composited = [];
+        // A4 portrait dimensions at 150 DPI
+        var sheetW = 1240;
+        var sheetH = 1754;
+        for (var i = 0; i < pages.length; i += layout) {
+          var count = Math.min(layout, pages.length - i);
+          var cols, rows;
+          if (layout === 2) { cols = 1; rows = 2; }
+          else if (layout === 3) { cols = 1; rows = 3; }
+          else { cols = 2; rows = 2; } // layout === 4
+          var tileW = Math.floor(sheetW / cols);
+          var tileH = Math.floor(sheetH / rows);
+          var sheetCanvas = document.createElement('canvas');
+          sheetCanvas.width = sheetW;
+          sheetCanvas.height = sheetH;
+          var sCtx = sheetCanvas.getContext('2d');
+          sCtx.fillStyle = '#ffffff';
+          sCtx.fillRect(0, 0, sheetW, sheetH);
+          for (var j = 0; j < count; j++) {
+            var col = j % cols;
+            var row = Math.floor(j / cols);
+            var img = new Image();
+            img.src = pages[i + j];
+            var dx = col * tileW;
+            var dy = row * tileH;
+            // Fit image within tile maintaining aspect ratio
+            var imgW = img.naturalWidth || img.width;
+            var imgH = img.naturalHeight || img.height;
+            if (imgW > 0 && imgH > 0) {
+              var scale = Math.min(tileW / imgW, tileH / imgH);
+              var drawW = imgW * scale;
+              var drawH = imgH * scale;
+              var offsetX = dx + (tileW - drawW) / 2;
+              var offsetY = dy + (tileH - drawH) / 2;
+              sCtx.drawImage(img, offsetX, offsetY, drawW, drawH);
+            } else {
+              sCtx.drawImage(img, dx, dy, tileW, tileH);
+            }
+          }
+          composited.push(sheetCanvas.toDataURL('image/png'));
+        }
+        console.log('[EXPORT] composited ' + pages.length + ' pages into ' + composited.length + ' sheets (layout=' + layout + ')');
+        selectedImgs = composited;
+      }
+
       // ── Android path (try/catch because typeof is unreliable for bridge methods) ──
       if (isAndroid) {
         var allSelected = selectedImgs.length === pageImages.length;
         var hasOriginal = false;
         try { hasOriginal = window.AndroidBridge.hasOriginalPdf(); } catch(e) {}
-        var useOriginal = !hadEraser && allSelected && contentType === 'pdf' && hasOriginal;
+        var useOriginal = !hadEraser && allSelected && contentType === 'pdf' && hasOriginal && layout === 1;
 
         console.log('[EXPORT] Android path: allSelected=' + allSelected
           + ' hasOriginal=' + hasOriginal + ' useOriginal=' + useOriginal);
