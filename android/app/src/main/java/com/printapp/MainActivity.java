@@ -28,6 +28,8 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.DownloadListener;
+import android.webkit.URLUtil;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -169,6 +171,44 @@ public class MainActivity extends AppCompatActivity {
 
         // Add JS bridge so web app can communicate with native
         webView.addJavascriptInterface(new WebAppInterface(), "AndroidBridge");
+
+        // Handle blob: and data: downloads from web path fallback
+        webView.setDownloadListener(new DownloadListener() {
+            @Override
+            public void onDownloadStart(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+                Log.d(TAG, "DownloadListener: mimeType=" + mimeType + " len=" + contentLength + " url=" + url.substring(0, Math.min(url.length(), 80)));
+                String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                if (fileName == null || fileName.isEmpty()) fileName = "print-document.pdf";
+                if (url.startsWith("blob:")) {
+                    // For blob URLs, ask JS to convert to base64 and pass back
+                    webView.evaluateJavascript(
+                        "(function(){" +
+                        "  var x=new XMLHttpRequest();" +
+                        "  x.open('GET','" + url.replace("'", "\\'") + "',true);" +
+                        "  x.responseType='blob';" +
+                        "  x.onload=function(){" +
+                        "    var r=new FileReader();" +
+                        "    r.onloadend=function(){" +
+                        "      var b64=r.result.split(',')[1];" +
+                        "      window.AndroidBridge.savePdfBase64(b64,'" + fileName.replace("'", "\\'") + "');" +
+                        "    };" +
+                        "    r.readAsDataURL(x.response);" +
+                        "  };" +
+                        "  x.send();" +
+                        "})();", null);
+                } else if (url.startsWith("data:")) {
+                    // data: URL — extract base64 directly
+                    try {
+                        String base64 = url.substring(url.indexOf(",") + 1);
+                        byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+                        savePdfToDownloads(bytes, fileName);
+                    } catch (Exception e) {
+                        Log.e(TAG, "DownloadListener data: URL error", e);
+                        Toast.makeText(MainActivity.this, "Download failed", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        });
 
         // Load PWA
         webView.loadUrl(PWA_URL);
@@ -1592,6 +1632,27 @@ public class MainActivity extends AppCompatActivity {
                     jsLog("sharePdf FAILED: " + e.getMessage());
                     runOnUiThread(() ->
                         Toast.makeText(MainActivity.this, "Share failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                }
+            }).start();
+        }
+        // Called from DownloadListener blob→base64 conversion
+        @JavascriptInterface
+        public void savePdfBase64(String base64, String fileName) {
+            Log.d(TAG, ">>> JS Bridge: savePdfBase64() called, fileName=" + fileName);
+            jsLog(">>> savePdfBase64() called, fileName=" + fileName);
+            new Thread(() -> {
+                try {
+                    byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+                    jsLog("savePdfBase64: decoded " + bytes.length + " bytes");
+                    savePdfToDownloads(bytes, fileName);
+                    jsLog("savePdfBase64: SUCCESS saved " + fileName);
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "Saved: " + fileName, Toast.LENGTH_SHORT).show());
+                } catch (Exception e) {
+                    Log.e(TAG, "savePdfBase64 FAILED", e);
+                    jsLog("savePdfBase64 FAILED: " + e.getMessage());
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
                 }
             }).start();
         }
