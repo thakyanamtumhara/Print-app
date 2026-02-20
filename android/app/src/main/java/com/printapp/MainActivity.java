@@ -1405,6 +1405,12 @@ public class MainActivity extends AppCompatActivity {
     public class WebAppInterface {
 
         @JavascriptInterface
+        public void showToast(String message) {
+            runOnUiThread(() ->
+                Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
+        }
+
+        @JavascriptInterface
         public void print(int copies) {
             Log.d(TAG, ">>> JS Bridge: print() called, copies=" + copies
                 + " printerFound=" + printerFound + " printerHost=" + printerHost);
@@ -1475,87 +1481,117 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void downloadOriginalPdf() {
-            jsLog("JS Bridge: downloadOriginalPdf()");
+            Log.d(TAG, ">>> JS Bridge: downloadOriginalPdf() called");
+            jsLog(">>> downloadOriginalPdf() called, pdfBytes=" + (originalPdfBytes != null ? originalPdfBytes.length : "NULL")
+                + " fileName=" + currentFileName);
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Downloading...", Toast.LENGTH_SHORT).show());
             byte[] pdfBytes = originalPdfBytes;
             if (pdfBytes == null) {
-                jsLog("downloadOriginalPdf: no PDF bytes");
+                jsLog("downloadOriginalPdf: no PDF bytes!");
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "No PDF loaded", Toast.LENGTH_SHORT).show());
                 return;
             }
             new Thread(() -> {
                 try {
                     String fileName = currentFileName != null ? currentFileName : "Print.pdf";
                     if (!fileName.toLowerCase().endsWith(".pdf")) fileName += ".pdf";
+                    jsLog("downloadOriginalPdf: saving " + pdfBytes.length + " bytes as " + fileName);
                     savePdfToDownloads(pdfBytes, fileName);
-                    jsLog("downloadOriginalPdf: saved " + pdfBytes.length + " bytes");
+                    jsLog("downloadOriginalPdf: SUCCESS saved " + fileName);
                     runOnUiThread(() ->
-                        Toast.makeText(MainActivity.this, "Saved to Downloads", Toast.LENGTH_SHORT).show());
+                        Toast.makeText(MainActivity.this, "Saved to Downloads: " + fileName, Toast.LENGTH_SHORT).show());
                 } catch (Exception e) {
+                    Log.e(TAG, "downloadOriginalPdf FAILED", e);
                     jsLog("downloadOriginalPdf FAILED: " + e.getMessage());
                     runOnUiThread(() ->
-                        Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                        Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
                 }
             }).start();
         }
 
         @JavascriptInterface
         public void downloadPdf(String pagesJson) {
-            jsLog("JS Bridge: downloadPdf() pagesJson length=" + (pagesJson != null ? pagesJson.length() : 0));
+            Log.d(TAG, ">>> JS Bridge: downloadPdf() called, json length=" + (pagesJson != null ? pagesJson.length() : "NULL"));
+            jsLog(">>> downloadPdf() called, json length=" + (pagesJson != null ? pagesJson.length() : 0));
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Creating PDF...", Toast.LENGTH_SHORT).show());
             new Thread(() -> {
                 try {
                     JSONArray arr = new JSONArray(pagesJson);
+                    jsLog("downloadPdf: parsed " + arr.length() + " pages");
                     String[] pages = new String[arr.length()];
-                    for (int i = 0; i < arr.length(); i++) pages[i] = arr.getString(i);
+                    for (int i = 0; i < arr.length(); i++) {
+                        pages[i] = arr.getString(i);
+                        jsLog("downloadPdf: page[" + i + "] dataUrl length=" + pages[i].length());
+                    }
 
                     byte[] pdfBytes = imagesToPdf(pages);
                     String fileName = "Print_" + System.currentTimeMillis() + ".pdf";
+                    jsLog("downloadPdf: saving " + pdfBytes.length + " bytes as " + fileName);
                     savePdfToDownloads(pdfBytes, fileName);
-                    jsLog("downloadPdf: saved " + pdfBytes.length + " bytes as " + fileName);
+                    jsLog("downloadPdf: SUCCESS saved " + fileName);
                     runOnUiThread(() ->
                         Toast.makeText(MainActivity.this, "Saved to Downloads", Toast.LENGTH_SHORT).show());
                 } catch (Exception e) {
+                    Log.e(TAG, "downloadPdf FAILED", e);
                     jsLog("downloadPdf FAILED: " + e.getMessage());
                     runOnUiThread(() ->
-                        Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                        Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
                 }
             }).start();
         }
 
         @JavascriptInterface
         public void shareOriginalPdf() {
-            jsLog("JS Bridge: shareOriginalPdf()");
+            Log.d(TAG, ">>> JS Bridge: shareOriginalPdf() called");
+            jsLog(">>> shareOriginalPdf() called, pdfBytes=" + (originalPdfBytes != null ? originalPdfBytes.length : "NULL")
+                + " fileName=" + currentFileName);
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Preparing share...", Toast.LENGTH_SHORT).show());
             byte[] pdfBytes = originalPdfBytes;
             if (pdfBytes == null) {
-                jsLog("shareOriginalPdf: no PDF bytes");
+                jsLog("shareOriginalPdf: no PDF bytes!");
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "No PDF loaded", Toast.LENGTH_SHORT).show());
                 return;
             }
             new Thread(() -> {
                 try {
                     String fileName = currentFileName != null ? currentFileName : "Print.pdf";
                     if (!fileName.toLowerCase().endsWith(".pdf")) fileName += ".pdf";
+                    jsLog("shareOriginalPdf: sharing " + pdfBytes.length + " bytes as " + fileName);
                     sharePdfBytes(pdfBytes, fileName);
+                    jsLog("shareOriginalPdf: SUCCESS");
                 } catch (Exception e) {
+                    Log.e(TAG, "shareOriginalPdf FAILED", e);
                     jsLog("shareOriginalPdf FAILED: " + e.getMessage());
                     runOnUiThread(() ->
-                        Toast.makeText(MainActivity.this, "Share failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                        Toast.makeText(MainActivity.this, "Share failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
                 }
             }).start();
         }
 
         @JavascriptInterface
         public void sharePdf(String pagesJson) {
-            jsLog("JS Bridge: sharePdf() pagesJson length=" + (pagesJson != null ? pagesJson.length() : 0));
+            Log.d(TAG, ">>> JS Bridge: sharePdf() called, json length=" + (pagesJson != null ? pagesJson.length() : "NULL"));
+            jsLog(">>> sharePdf() called, json length=" + (pagesJson != null ? pagesJson.length() : 0));
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Creating PDF for share...", Toast.LENGTH_SHORT).show());
             new Thread(() -> {
                 try {
                     JSONArray arr = new JSONArray(pagesJson);
+                    jsLog("sharePdf: parsed " + arr.length() + " pages");
                     String[] pages = new String[arr.length()];
-                    for (int i = 0; i < arr.length(); i++) pages[i] = arr.getString(i);
+                    for (int i = 0; i < arr.length(); i++) {
+                        pages[i] = arr.getString(i);
+                        jsLog("sharePdf: page[" + i + "] dataUrl length=" + pages[i].length());
+                    }
 
                     byte[] pdfBytes = imagesToPdf(pages);
+                    jsLog("sharePdf: created " + pdfBytes.length + " byte PDF, sharing...");
                     sharePdfBytes(pdfBytes, "Print.pdf");
+                    jsLog("sharePdf: SUCCESS");
                 } catch (Exception e) {
+                    Log.e(TAG, "sharePdf FAILED", e);
                     jsLog("sharePdf FAILED: " + e.getMessage());
                     runOnUiThread(() ->
-                        Toast.makeText(MainActivity.this, "Share failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                        Toast.makeText(MainActivity.this, "Share failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
                 }
             }).start();
         }

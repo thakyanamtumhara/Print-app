@@ -587,7 +587,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function clearWhiteout() {
     strokes = [];
     currentStroke = null;
-    eraserEverUsed = false;
+    // NOTE: do NOT reset eraserEverUsed here — bakeStrokes calls clearWhiteout
+    // after baking marks into pageImages. eraserEverUsed is only reset in displayFile/displayFileFromBase64.
     ctx.clearRect(0, 0, whiteoutCanvas.width, whiteoutCanvas.height);
     updateUndoBtn();
   }
@@ -705,6 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function displayFile(file) {
     clearWhiteout();
+    eraserEverUsed = false;
     zoom = 1;
     applyZoom();
     if (file.type.startsWith('image/')) {
@@ -740,6 +742,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function displayFileFromBase64(name, mimeType, base64Data) {
     clearWhiteout();
+    eraserEverUsed = false;
     zoom = 1;
     applyZoom();
     if (mimeType.startsWith('image/')) {
@@ -783,54 +786,86 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ── Download PDF button ──
-  downloadBtn.addEventListener('click', function() {
-    console.log('[EXPORT] Download clicked, contentType=' + contentType + ' pages=' + pageImages.length + ' eraserUsed=' + eraserEverUsed);
-    bakeStrokes();
-    var selectedImgs = [];
-    for (var i = 0; i < pageImages.length; i++) {
-      if (selectedPages[i] !== false) selectedImgs.push(pageImages[i]);
-    }
-    if (selectedImgs.length === 0 && contentType === 'label') {
-      // For labels, use Android bridge label export or skip
-      return;
-    }
-    if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
-      var allSelected = selectedImgs.length === pageImages.length;
-      if (!eraserEverUsed && allSelected && contentType === 'pdf'
-          && window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf()) {
-        console.log('[EXPORT] Download: using original PDF');
-        window.AndroidBridge.downloadOriginalPdf();
-      } else if (selectedImgs.length > 0) {
-        console.log('[EXPORT] Download: creating PDF from ' + selectedImgs.length + ' images');
-        window.AndroidBridge.downloadPdf(JSON.stringify(selectedImgs));
+  // ── Helper: export selected pages (download or share) ──
+  function exportPdf(action) {
+    try {
+      console.log('[EXPORT] ' + action + ' clicked. contentType=' + contentType
+        + ' pageImages=' + pageImages.length + ' eraserEverUsed=' + eraserEverUsed
+        + ' hasAndroid=' + !!(window.AndroidBridge && window.AndroidBridge.isAndroid && window.AndroidBridge.isAndroid()));
+
+      // Check if anything is loaded
+      if (pageImages.length === 0) {
+        console.log('[EXPORT] ' + action + ': no pages loaded, aborting');
+        if (window.AndroidBridge && window.AndroidBridge.showToast) {
+          window.AndroidBridge.showToast('Open a file first');
+        }
+        return;
       }
+
+      // Save eraser state BEFORE baking (bakeStrokes→clearWhiteout clears strokes)
+      var hadEraser = eraserEverUsed;
+      console.log('[EXPORT] ' + action + ': hadEraser=' + hadEraser + ' strokes=' + strokes.length);
+      bakeStrokes();
+
+      // Build selected pages list
+      var selectedImgs = [];
+      for (var i = 0; i < pageImages.length; i++) {
+        if (selectedPages[i] !== false) selectedImgs.push(pageImages[i]);
+      }
+      console.log('[EXPORT] ' + action + ': selectedImgs=' + selectedImgs.length
+        + '/' + pageImages.length + ' contentType=' + contentType);
+
+      if (selectedImgs.length === 0) {
+        console.log('[EXPORT] ' + action + ': no pages selected, aborting');
+        return;
+      }
+
+      // Check Android bridge
+      if (!window.AndroidBridge) {
+        console.log('[EXPORT] ' + action + ': no AndroidBridge');
+        return;
+      }
+      if (!window.AndroidBridge.isAndroid || !window.AndroidBridge.isAndroid()) {
+        console.log('[EXPORT] ' + action + ': not Android');
+        return;
+      }
+
+      var allSelected = selectedImgs.length === pageImages.length;
+      var hasOriginal = window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf();
+      var useOriginal = !hadEraser && allSelected && contentType === 'pdf' && hasOriginal;
+
+      console.log('[EXPORT] ' + action + ': allSelected=' + allSelected
+        + ' hasOriginal=' + hasOriginal + ' useOriginal=' + useOriginal);
+
+      if (action === 'download') {
+        if (useOriginal) {
+          console.log('[EXPORT] calling downloadOriginalPdf()');
+          window.AndroidBridge.downloadOriginalPdf();
+        } else {
+          console.log('[EXPORT] calling downloadPdf() with ' + selectedImgs.length + ' images'
+            + ' dataUrl[0] length=' + (selectedImgs[0] ? selectedImgs[0].length : 0));
+          window.AndroidBridge.downloadPdf(JSON.stringify(selectedImgs));
+        }
+      } else {
+        if (useOriginal) {
+          console.log('[EXPORT] calling shareOriginalPdf()');
+          window.AndroidBridge.shareOriginalPdf();
+        } else {
+          console.log('[EXPORT] calling sharePdf() with ' + selectedImgs.length + ' images'
+            + ' dataUrl[0] length=' + (selectedImgs[0] ? selectedImgs[0].length : 0));
+          window.AndroidBridge.sharePdf(JSON.stringify(selectedImgs));
+        }
+      }
+    } catch (err) {
+      console.error('[EXPORT] ' + action + ' ERROR: ' + err.message + '\n' + err.stack);
     }
-  });
+  }
+
+  // ── Download PDF button ──
+  downloadBtn.addEventListener('click', function() { exportPdf('download'); });
 
   // ── Share PDF button ──
-  shareBtn.addEventListener('click', function() {
-    console.log('[EXPORT] Share clicked, contentType=' + contentType + ' pages=' + pageImages.length + ' eraserUsed=' + eraserEverUsed);
-    bakeStrokes();
-    var selectedImgs = [];
-    for (var i = 0; i < pageImages.length; i++) {
-      if (selectedPages[i] !== false) selectedImgs.push(pageImages[i]);
-    }
-    if (selectedImgs.length === 0 && contentType === 'label') {
-      return;
-    }
-    if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
-      var allSelected = selectedImgs.length === pageImages.length;
-      if (!eraserEverUsed && allSelected && contentType === 'pdf'
-          && window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf()) {
-        console.log('[EXPORT] Share: using original PDF');
-        window.AndroidBridge.shareOriginalPdf();
-      } else if (selectedImgs.length > 0) {
-        console.log('[EXPORT] Share: creating PDF from ' + selectedImgs.length + ' images');
-        window.AndroidBridge.sharePdf(JSON.stringify(selectedImgs));
-      }
-    }
-  });
+  shareBtn.addEventListener('click', function() { exportPdf('share'); });
 
   window.handleNativeFile = displayFileFromBase64;
 
