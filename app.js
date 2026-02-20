@@ -787,18 +787,159 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ── Helper: export selected pages (download or share) ──
+  // ── Web-native PDF builder from JPEG data URLs ──
+  // Builds a valid PDF with embedded JPEG images (no external library needed)
+  function buildPdfFromImages(imageDataUrls) {
+    console.log('[PDF-BUILD] Building PDF from ' + imageDataUrls.length + ' images');
+    var objects = [];
+    var xref = [];
+
+    function addObj(content) {
+      var num = objects.length + 1;
+      objects.push(num + ' 0 obj\n' + content + '\nendobj\n');
+      return num;
+    }
+
+    // Decode base64 JPEG data URLs to binary arrays
+    var imgBinaries = [];
+    for (var i = 0; i < imageDataUrls.length; i++) {
+      var dataUrl = imageDataUrls[i];
+      var base64 = dataUrl.indexOf(',') >= 0 ? dataUrl.split(',')[1] : dataUrl;
+      var raw = atob(base64);
+      var bytes = new Uint8Array(raw.length);
+      for (var j = 0; j < raw.length; j++) bytes[j] = raw.charCodeAt(j);
+      imgBinaries.push(bytes);
+      console.log('[PDF-BUILD] Image ' + i + ': base64len=' + base64.length + ' bytes=' + bytes.length);
+    }
+
+    // Get image dimensions from JPEG SOF marker
+    function getJpegDimensions(data) {
+      var pos = 2;
+      while (pos < data.length - 1) {
+        if (data[pos] !== 0xFF) break;
+        var marker = data[pos + 1];
+        if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
+          var h = (data[pos + 5] << 8) | data[pos + 6];
+          var w = (data[pos + 7] << 8) | data[pos + 8];
+          return { width: w, height: h };
+        }
+        var len = (data[pos + 2] << 8) | data[pos + 3];
+        pos += 2 + len;
+      }
+      return { width: 595, height: 842 }; // fallback A4
+    }
+
+    // Object 1: Catalog
+    var catalogNum = addObj('<< /Type /Catalog /Pages 2 0 R >>');
+
+    // Build page tree — we need to know all objects first
+    // Reserve object 2 for Pages
+    objects.push(''); // placeholder for Pages object
+    var pagesNum = 2;
+
+    var pageObjNums = [];
+    var imgObjNums = [];
+
+    for (var p = 0; p < imageDataUrls.length; p++) {
+      var dim = getJpegDimensions(imgBinaries[p]);
+      console.log('[PDF-BUILD] Page ' + p + ': imgDim=' + dim.width + 'x' + dim.height);
+
+      // Determine page size in points (A4 = 595x842)
+      var landscape = dim.width > dim.height;
+      var pageW = landscape ? 842 : 595;
+      var pageH = landscape ? 595 : 842;
+
+      // Image XObject — stored as obj num
+      var imgNum = objects.length + 1;
+      // We'll build the stream content after, using a special marker
+      imgObjNums.push({ num: imgNum, dataIdx: p, w: dim.width, h: dim.height });
+      objects.push('IMG_PLACEHOLDER_' + p); // will be replaced
+
+      // Content stream: draw image scaled to full page
+      var contentStr = 'q ' + pageW + ' 0 0 ' + pageH + ' 0 0 cm /Img' + p + ' Do Q';
+      var contentNum = addObj('<< /Length ' + contentStr.length + ' >>\nstream\n' + contentStr + '\nendstream');
+
+      // Page object
+      var pageNum = addObj('<< /Type /Page /Parent ' + pagesNum + ' 0 R /MediaBox [0 0 ' + pageW + ' ' + pageH + '] /Contents ' + contentNum + ' 0 R /Resources << /XObject << /Img' + p + ' ' + imgNum + ' 0 R >> >> >>');
+      pageObjNums.push(pageNum);
+    }
+
+    // Now fill in Pages object (object 2)
+    var kidsStr = '';
+    for (var k = 0; k < pageObjNums.length; k++) {
+      kidsStr += pageObjNums[k] + ' 0 R ';
+    }
+    objects[1] = pagesNum + ' 0 obj\n<< /Type /Pages /Kids [' + kidsStr.trim() + '] /Count ' + pageObjNums.length + ' >>\nendobj\n';
+
+    // Now build the actual PDF binary
+    // First, build all non-image object strings
+    var header = '%PDF-1.4\n%\xFF\xFF\xFF\xFF\n';
+    var chunks = [header];
+    var offsets = [];
+
+    for (var o = 0; o < objects.length; o++) {
+      if (typeof objects[o] === 'string' && objects[o].indexOf('IMG_PLACEHOLDER_') === 0) {
+        // This is an image object — we'll handle it specially
+        var idx = parseInt(objects[o].replace('IMG_PLACEHOLDER_', ''));
+        var imgInfo = imgObjNums[idx];
+        var imgHeader = (o + 1) + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + imgInfo.w + ' /Height ' + imgInfo.h + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + imgBinaries[idx].length + ' >>\nstream\n';
+        var imgFooter = '\nendstream\nendobj\n';
+
+        offsets.push(chunks.reduce(function(sum, c) { return sum + (typeof c === 'string' ? c.length : c.length); }, 0));
+        chunks.push(imgHeader);
+        chunks.push(imgBinaries[idx]); // raw binary
+        chunks.push(imgFooter);
+      } else {
+        offsets.push(chunks.reduce(function(sum, c) { return sum + (typeof c === 'string' ? c.length : c.length); }, 0));
+        chunks.push(objects[o]);
+      }
+    }
+
+    // Cross-reference table
+    var xrefOffset = chunks.reduce(function(sum, c) { return sum + (typeof c === 'string' ? c.length : c.length); }, 0);
+    var xrefStr = 'xref\n0 ' + (objects.length + 1) + '\n0000000000 65535 f \n';
+    for (var x = 0; x < offsets.length; x++) {
+      var off = offsets[x].toString();
+      while (off.length < 10) off = '0' + off;
+      xrefStr += off + ' 00000 n \n';
+    }
+    xrefStr += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root ' + catalogNum + ' 0 R >>\nstartxref\n' + xrefOffset + '\n%%EOF';
+    chunks.push(xrefStr);
+
+    // Combine all chunks into a single Uint8Array
+    var totalLen = 0;
+    for (var ci = 0; ci < chunks.length; ci++) {
+      totalLen += (typeof chunks[ci] === 'string') ? chunks[ci].length : chunks[ci].length;
+    }
+    var result = new Uint8Array(totalLen);
+    var pos = 0;
+    for (var ci2 = 0; ci2 < chunks.length; ci2++) {
+      var chunk = chunks[ci2];
+      if (typeof chunk === 'string') {
+        for (var si = 0; si < chunk.length; si++) {
+          result[pos++] = chunk.charCodeAt(si);
+        }
+      } else {
+        result.set(chunk, pos);
+        pos += chunk.length;
+      }
+    }
+
+    console.log('[PDF-BUILD] Final PDF size: ' + result.length + ' bytes');
+    return result;
+  }
+
   function exportPdf(action) {
     try {
+      var isAndroid = !!(window.AndroidBridge && window.AndroidBridge.isAndroid && window.AndroidBridge.isAndroid());
       console.log('[EXPORT] ' + action + ' clicked. contentType=' + contentType
         + ' pageImages=' + pageImages.length + ' eraserEverUsed=' + eraserEverUsed
-        + ' hasAndroid=' + !!(window.AndroidBridge && window.AndroidBridge.isAndroid && window.AndroidBridge.isAndroid()));
+        + ' isAndroid=' + isAndroid);
 
       // Check if anything is loaded
       if (pageImages.length === 0) {
         console.log('[EXPORT] ' + action + ': no pages loaded, aborting');
-        if (window.AndroidBridge && window.AndroidBridge.showToast) {
-          window.AndroidBridge.showToast('Open a file first');
-        }
+        alert('Open a file first');
         return;
       }
 
@@ -817,47 +958,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (selectedImgs.length === 0) {
         console.log('[EXPORT] ' + action + ': no pages selected, aborting');
+        alert('No pages selected');
         return;
       }
 
-      // Check Android bridge
-      if (!window.AndroidBridge) {
-        console.log('[EXPORT] ' + action + ': no AndroidBridge');
-        return;
-      }
-      if (!window.AndroidBridge.isAndroid || !window.AndroidBridge.isAndroid()) {
-        console.log('[EXPORT] ' + action + ': not Android');
+      // ── Android path ──
+      if (isAndroid) {
+        var allSelected = selectedImgs.length === pageImages.length;
+        var hasOriginal = window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf();
+        var useOriginal = !hadEraser && allSelected && contentType === 'pdf' && hasOriginal;
+
+        console.log('[EXPORT] Android path: allSelected=' + allSelected
+          + ' hasOriginal=' + hasOriginal + ' useOriginal=' + useOriginal);
+
+        if (action === 'download') {
+          if (useOriginal) {
+            console.log('[EXPORT] calling downloadOriginalPdf()');
+            window.AndroidBridge.downloadOriginalPdf();
+          } else {
+            console.log('[EXPORT] calling downloadPdf() with ' + selectedImgs.length + ' images');
+            window.AndroidBridge.downloadPdf(JSON.stringify(selectedImgs));
+          }
+        } else {
+          if (useOriginal) {
+            console.log('[EXPORT] calling shareOriginalPdf()');
+            window.AndroidBridge.shareOriginalPdf();
+          } else {
+            console.log('[EXPORT] calling sharePdf() with ' + selectedImgs.length + ' images');
+            window.AndroidBridge.sharePdf(JSON.stringify(selectedImgs));
+          }
+        }
         return;
       }
 
-      var allSelected = selectedImgs.length === pageImages.length;
-      var hasOriginal = window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf();
-      var useOriginal = !hadEraser && allSelected && contentType === 'pdf' && hasOriginal;
-
-      console.log('[EXPORT] ' + action + ': allSelected=' + allSelected
-        + ' hasOriginal=' + hasOriginal + ' useOriginal=' + useOriginal);
+      // ── Web path (browser / GitHub Pages) ──
+      console.log('[EXPORT] Web path: building PDF from ' + selectedImgs.length + ' images');
+      var pdfBytes = buildPdfFromImages(selectedImgs);
+      var blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      var fileName = 'print-document-' + Date.now() + '.pdf';
+      console.log('[EXPORT] PDF blob created: ' + blob.size + ' bytes, fileName=' + fileName);
 
       if (action === 'download') {
-        if (useOriginal) {
-          console.log('[EXPORT] calling downloadOriginalPdf()');
-          window.AndroidBridge.downloadOriginalPdf();
-        } else {
-          console.log('[EXPORT] calling downloadPdf() with ' + selectedImgs.length + ' images'
-            + ' dataUrl[0] length=' + (selectedImgs[0] ? selectedImgs[0].length : 0));
-          window.AndroidBridge.downloadPdf(JSON.stringify(selectedImgs));
-        }
+        // Trigger browser download
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
+        console.log('[EXPORT] Download triggered');
       } else {
-        if (useOriginal) {
-          console.log('[EXPORT] calling shareOriginalPdf()');
-          window.AndroidBridge.shareOriginalPdf();
+        // Share via Web Share API
+        if (navigator.share && navigator.canShare) {
+          var file = new File([blob], fileName, { type: 'application/pdf' });
+          var shareData = { files: [file], title: 'Print Document' };
+          if (navigator.canShare(shareData)) {
+            navigator.share(shareData).then(function() {
+              console.log('[EXPORT] Share completed');
+            }).catch(function(err) {
+              console.log('[EXPORT] Share cancelled/failed: ' + err.message);
+            });
+          } else {
+            console.log('[EXPORT] canShare returned false, falling back to download');
+            alert('Sharing not supported on this device. Downloading instead.');
+            exportPdf('download');
+          }
         } else {
-          console.log('[EXPORT] calling sharePdf() with ' + selectedImgs.length + ' images'
-            + ' dataUrl[0] length=' + (selectedImgs[0] ? selectedImgs[0].length : 0));
-          window.AndroidBridge.sharePdf(JSON.stringify(selectedImgs));
+          console.log('[EXPORT] Web Share API not available, falling back to download');
+          alert('Share not available in this browser. Downloading instead.');
+          exportPdf('download');
         }
       }
     } catch (err) {
       console.error('[EXPORT] ' + action + ' ERROR: ' + err.message + '\n' + err.stack);
+      alert('Export failed: ' + err.message);
     }
   }
 
