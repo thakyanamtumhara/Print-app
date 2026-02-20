@@ -1022,51 +1022,72 @@ document.addEventListener('DOMContentLoaded', () => {
         var pages = (contentType === 'image')
           ? Array(layout).fill(selectedImgs[0])
           : selectedImgs;
-        var composited = [];
-        // A4 portrait dimensions at 150 DPI
-        var sheetW = 1240;
-        var sheetH = 1754;
-        for (var i = 0; i < pages.length; i += layout) {
-          var count = Math.min(layout, pages.length - i);
-          var cols, rows;
-          if (layout === 2) { cols = 1; rows = 2; }
-          else if (layout === 3) { cols = 1; rows = 3; }
-          else { cols = 2; rows = 2; } // layout === 4
-          var tileW = Math.floor(sheetW / cols);
-          var tileH = Math.floor(sheetH / rows);
-          var sheetCanvas = document.createElement('canvas');
-          sheetCanvas.width = sheetW;
-          sheetCanvas.height = sheetH;
-          var sCtx = sheetCanvas.getContext('2d');
-          sCtx.fillStyle = '#ffffff';
-          sCtx.fillRect(0, 0, sheetW, sheetH);
-          for (var j = 0; j < count; j++) {
-            var col = j % cols;
-            var row = Math.floor(j / cols);
-            var img = new Image();
-            img.src = pages[i + j];
-            var dx = col * tileW;
-            var dy = row * tileH;
-            // Fit image within tile maintaining aspect ratio
-            var imgW = img.naturalWidth || img.width;
-            var imgH = img.naturalHeight || img.height;
-            if (imgW > 0 && imgH > 0) {
-              var scale = Math.min(tileW / imgW, tileH / imgH);
-              var drawW = imgW * scale;
-              var drawH = imgH * scale;
-              var offsetX = dx + (tileW - drawW) / 2;
-              var offsetY = dy + (tileH - drawH) / 2;
-              sCtx.drawImage(img, offsetX, offsetY, drawW, drawH);
-            } else {
-              sCtx.drawImage(img, dx, dy, tileW, tileH);
-            }
-          }
-          composited.push(sheetCanvas.toDataURL('image/png'));
+        // Preload all images first (data URLs don't decode synchronously)
+        var imgPromises = [];
+        for (var k = 0; k < pages.length; k++) {
+          imgPromises.push((function(src) {
+            return new Promise(function(resolve) {
+              var img = new Image();
+              img.onload = function() { resolve(img); };
+              img.onerror = function() { resolve(img); };
+              img.src = src;
+            });
+          })(pages[k]));
         }
-        console.log('[EXPORT] composited ' + pages.length + ' pages into ' + composited.length + ' sheets (layout=' + layout + ')');
-        selectedImgs = composited;
+        Promise.all(imgPromises).then(function(images) {
+          var composited = [];
+          var sheetW = 1240;
+          var sheetH = 1754;
+          for (var i = 0; i < images.length; i += layout) {
+            var count = Math.min(layout, images.length - i);
+            var cols, rows;
+            if (layout === 2) { cols = 1; rows = 2; }
+            else if (layout === 3) { cols = 1; rows = 3; }
+            else { cols = 2; rows = 2; }
+            var tileW = Math.floor(sheetW / cols);
+            var tileH = Math.floor(sheetH / rows);
+            var sheetCanvas = document.createElement('canvas');
+            sheetCanvas.width = sheetW;
+            sheetCanvas.height = sheetH;
+            var sCtx = sheetCanvas.getContext('2d');
+            sCtx.fillStyle = '#ffffff';
+            sCtx.fillRect(0, 0, sheetW, sheetH);
+            for (var j = 0; j < count; j++) {
+              var col = j % cols;
+              var row = Math.floor(j / cols);
+              var img = images[i + j];
+              var dx = col * tileW;
+              var dy = row * tileH;
+              var imgW = img.naturalWidth || img.width;
+              var imgH = img.naturalHeight || img.height;
+              if (imgW > 0 && imgH > 0) {
+                var scale = Math.min(tileW / imgW, tileH / imgH);
+                var drawW = imgW * scale;
+                var drawH = imgH * scale;
+                var offsetX = dx + (tileW - drawW) / 2;
+                var offsetY = dy + (tileH - drawH) / 2;
+                sCtx.drawImage(img, offsetX, offsetY, drawW, drawH);
+              } else {
+                sCtx.drawImage(img, dx, dy, tileW, tileH);
+              }
+            }
+            composited.push(sheetCanvas.toDataURL('image/png'));
+          }
+          console.log('[EXPORT] composited ' + images.length + ' pages into ' + composited.length + ' sheets (layout=' + layout + ')');
+          finishExport(composited, action, hadEraser, isAndroid, layout);
+        });
+        return;
       }
 
+      finishExport(selectedImgs, action, hadEraser, isAndroid, layout);
+    } catch (err) {
+      console.error('[EXPORT] ' + action + ' ERROR: ' + err.message + '\n' + err.stack);
+      alert('Export failed: ' + err.message);
+    }
+  }
+
+  function finishExport(selectedImgs, action, hadEraser, isAndroid, layout) {
+    try {
       // ── Android path (try/catch because typeof is unreliable for bridge methods) ──
       if (isAndroid) {
         var allSelected = selectedImgs.length === pageImages.length;
