@@ -1071,7 +1071,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 sCtx.drawImage(img, dx, dy, tileW, tileH);
               }
             }
-            composited.push(sheetCanvas.toDataURL('image/png'));
+            composited.push(sheetCanvas.toDataURL('image/jpeg', 0.92));
           }
           console.log('[EXPORT] composited ' + images.length + ' pages into ' + composited.length + ' sheets (layout=' + layout + ')');
           finishExport(composited, action, hadEraser, isAndroid, layout);
