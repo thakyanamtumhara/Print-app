@@ -37,6 +37,8 @@ document.addEventListener('DOMContentLoaded', () => {
   var printerDot = document.getElementById('printerDot');
   var printerText = document.getElementById('printerText');
   var openFileBtn = document.getElementById('openFileBtn');
+  var downloadBtn = document.getElementById('downloadBtn');
+  var shareBtn = document.getElementById('shareBtn');
   var fileInput = document.getElementById('fileInput');
 
   var pageImages = [];     // data-URL per PDF/image page (for printing)
@@ -44,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var contentType = 'label'; // 'label' | 'pdf' | 'image'
   var selectedPages = [];  // boolean array — true = page selected for printing
   var eraserEnabled = false;
+  var eraserEverUsed = false; // tracks if eraser was used on current file
 
   // ── Printer status ──
   // Android app: green/red blink based on actual WiFi detection
@@ -371,6 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.touches && e.touches.length === 1 && isPinching) return;
     if (e.touches && e.touches.length === 0) isPinching = false;
     if (currentStroke && currentStroke.pts.length > 0) {
+      eraserEverUsed = true;
       // If it was just a tap (no move), paint the dot now
       if (currentStroke.pts.length === 1) {
         ctx.fillStyle = '#FFFFFF';
@@ -583,6 +587,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function clearWhiteout() {
     strokes = [];
     currentStroke = null;
+    eraserEverUsed = false;
     ctx.clearRect(0, 0, whiteoutCanvas.width, whiteoutCanvas.height);
     updateUndoBtn();
   }
@@ -775,6 +780,55 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileInput.files && fileInput.files[0]) {
       displayFile(fileInput.files[0]);
       fileInput.value = '';
+    }
+  });
+
+  // ── Download PDF button ──
+  downloadBtn.addEventListener('click', function() {
+    console.log('[EXPORT] Download clicked, contentType=' + contentType + ' pages=' + pageImages.length + ' eraserUsed=' + eraserEverUsed);
+    bakeStrokes();
+    var selectedImgs = [];
+    for (var i = 0; i < pageImages.length; i++) {
+      if (selectedPages[i] !== false) selectedImgs.push(pageImages[i]);
+    }
+    if (selectedImgs.length === 0 && contentType === 'label') {
+      // For labels, use Android bridge label export or skip
+      return;
+    }
+    if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
+      var allSelected = selectedImgs.length === pageImages.length;
+      if (!eraserEverUsed && allSelected && contentType === 'pdf'
+          && window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf()) {
+        console.log('[EXPORT] Download: using original PDF');
+        window.AndroidBridge.downloadOriginalPdf();
+      } else if (selectedImgs.length > 0) {
+        console.log('[EXPORT] Download: creating PDF from ' + selectedImgs.length + ' images');
+        window.AndroidBridge.downloadPdf(JSON.stringify(selectedImgs));
+      }
+    }
+  });
+
+  // ── Share PDF button ──
+  shareBtn.addEventListener('click', function() {
+    console.log('[EXPORT] Share clicked, contentType=' + contentType + ' pages=' + pageImages.length + ' eraserUsed=' + eraserEverUsed);
+    bakeStrokes();
+    var selectedImgs = [];
+    for (var i = 0; i < pageImages.length; i++) {
+      if (selectedPages[i] !== false) selectedImgs.push(pageImages[i]);
+    }
+    if (selectedImgs.length === 0 && contentType === 'label') {
+      return;
+    }
+    if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
+      var allSelected = selectedImgs.length === pageImages.length;
+      if (!eraserEverUsed && allSelected && contentType === 'pdf'
+          && window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf()) {
+        console.log('[EXPORT] Share: using original PDF');
+        window.AndroidBridge.shareOriginalPdf();
+      } else if (selectedImgs.length > 0) {
+        console.log('[EXPORT] Share: creating PDF from ' + selectedImgs.length + ' images');
+        window.AndroidBridge.sharePdf(JSON.stringify(selectedImgs));
+      }
     }
   });
 

@@ -252,6 +252,13 @@ html, body {
   background: #555;
 }
 
+/* ── Action Buttons Container ── */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 /* ── Open File Icon Button ── */
 .open-file-icon {
   width: 38px;

@@ -15,6 +15,10 @@ import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
 import android.provider.OpenableColumns;
+import android.content.ContentValues;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.util.Base64;
 import android.util.Log;
 import android.webkit.ConsoleMessage;
@@ -27,6 +31,7 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import android.net.ConnectivityManager;
@@ -36,6 +41,7 @@ import android.net.NetworkCapabilities;
 import org.json.JSONArray;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -1466,5 +1472,185 @@ public class MainActivity extends AppCompatActivity {
                 startActivityForResult(intent, NATIVE_FILE_PICKER_REQUEST);
             });
         }
+
+        @JavascriptInterface
+        public void downloadOriginalPdf() {
+            jsLog("JS Bridge: downloadOriginalPdf()");
+            byte[] pdfBytes = originalPdfBytes;
+            if (pdfBytes == null) {
+                jsLog("downloadOriginalPdf: no PDF bytes");
+                return;
+            }
+            new Thread(() -> {
+                try {
+                    String fileName = currentFileName != null ? currentFileName : "Print.pdf";
+                    if (!fileName.toLowerCase().endsWith(".pdf")) fileName += ".pdf";
+                    savePdfToDownloads(pdfBytes, fileName);
+                    jsLog("downloadOriginalPdf: saved " + pdfBytes.length + " bytes");
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "Saved to Downloads", Toast.LENGTH_SHORT).show());
+                } catch (Exception e) {
+                    jsLog("downloadOriginalPdf FAILED: " + e.getMessage());
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void downloadPdf(String pagesJson) {
+            jsLog("JS Bridge: downloadPdf() pagesJson length=" + (pagesJson != null ? pagesJson.length() : 0));
+            new Thread(() -> {
+                try {
+                    JSONArray arr = new JSONArray(pagesJson);
+                    String[] pages = new String[arr.length()];
+                    for (int i = 0; i < arr.length(); i++) pages[i] = arr.getString(i);
+
+                    byte[] pdfBytes = imagesToPdf(pages);
+                    String fileName = "Print_" + System.currentTimeMillis() + ".pdf";
+                    savePdfToDownloads(pdfBytes, fileName);
+                    jsLog("downloadPdf: saved " + pdfBytes.length + " bytes as " + fileName);
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "Saved to Downloads", Toast.LENGTH_SHORT).show());
+                } catch (Exception e) {
+                    jsLog("downloadPdf FAILED: " + e.getMessage());
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "Download failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void shareOriginalPdf() {
+            jsLog("JS Bridge: shareOriginalPdf()");
+            byte[] pdfBytes = originalPdfBytes;
+            if (pdfBytes == null) {
+                jsLog("shareOriginalPdf: no PDF bytes");
+                return;
+            }
+            new Thread(() -> {
+                try {
+                    String fileName = currentFileName != null ? currentFileName : "Print.pdf";
+                    if (!fileName.toLowerCase().endsWith(".pdf")) fileName += ".pdf";
+                    sharePdfBytes(pdfBytes, fileName);
+                } catch (Exception e) {
+                    jsLog("shareOriginalPdf FAILED: " + e.getMessage());
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "Share failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void sharePdf(String pagesJson) {
+            jsLog("JS Bridge: sharePdf() pagesJson length=" + (pagesJson != null ? pagesJson.length() : 0));
+            new Thread(() -> {
+                try {
+                    JSONArray arr = new JSONArray(pagesJson);
+                    String[] pages = new String[arr.length()];
+                    for (int i = 0; i < arr.length(); i++) pages[i] = arr.getString(i);
+
+                    byte[] pdfBytes = imagesToPdf(pages);
+                    sharePdfBytes(pdfBytes, "Print.pdf");
+                } catch (Exception e) {
+                    jsLog("sharePdf FAILED: " + e.getMessage());
+                    runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "Share failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            }).start();
+        }
+    }
+
+    // ══════════════════════════════════════════
+    // ── PDF Export Helpers (Download / Share) ──
+    // ══════════════════════════════════════════
+
+    // Create a multi-page PDF from image data URLs (600 DPI quality preserved)
+    private byte[] imagesToPdf(String[] imageDataUrls) throws Exception {
+        jsLog("imagesToPdf: creating PDF from " + imageDataUrls.length + " images");
+        PdfDocument pdf = new PdfDocument();
+
+        for (int i = 0; i < imageDataUrls.length; i++) {
+            String dataUrl = imageDataUrls[i];
+            int commaIdx = dataUrl.indexOf(',');
+            if (commaIdx < 0) continue;
+            String b64 = dataUrl.substring(commaIdx + 1);
+            byte[] imgBytes = Base64.decode(b64, Base64.DEFAULT);
+            Bitmap bmp = BitmapFactory.decodeByteArray(imgBytes, 0, imgBytes.length);
+            if (bmp == null) continue;
+
+            // A4 in PostScript points — auto-detect landscape
+            int pageWidthPt, pageHeightPt;
+            if (bmp.getWidth() > bmp.getHeight()) {
+                pageWidthPt = 842;  // landscape
+                pageHeightPt = 595;
+            } else {
+                pageWidthPt = 595;  // portrait
+                pageHeightPt = 842;
+            }
+
+            PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
+                pageWidthPt, pageHeightPt, i + 1).create();
+            PdfDocument.Page page = pdf.startPage(pageInfo);
+            Canvas canvas = page.getCanvas();
+            canvas.drawBitmap(bmp, null,
+                new android.graphics.Rect(0, 0, pageWidthPt, pageHeightPt), null);
+            pdf.finishPage(page);
+            bmp.recycle();
+            jsLog("imagesToPdf: page " + (i + 1) + " " + pageWidthPt + "x" + pageHeightPt + "pt");
+        }
+
+        ByteArrayOutputStream pdfOut = new ByteArrayOutputStream();
+        pdf.writeTo(pdfOut);
+        pdf.close();
+        jsLog("imagesToPdf: total PDF size=" + pdfOut.size() + " bytes");
+        return pdfOut.toByteArray();
+    }
+
+    // Save PDF bytes to the Downloads folder
+    private void savePdfToDownloads(byte[] pdfBytes, String fileName) throws Exception {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+: use MediaStore
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Downloads.MIME_TYPE, "application/pdf");
+            values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new Exception("Failed to create file in Downloads");
+
+            OutputStream out = getContentResolver().openOutputStream(uri);
+            if (out == null) throw new Exception("Failed to open output stream");
+            out.write(pdfBytes);
+            out.close();
+        } else {
+            // Android 9 and below: write directly
+            File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (!dir.exists()) dir.mkdirs();
+            File file = new File(dir, fileName);
+            FileOutputStream fos = new FileOutputStream(file);
+            fos.write(pdfBytes);
+            fos.close();
+        }
+        jsLog("savePdfToDownloads: saved " + fileName + " (" + pdfBytes.length + " bytes)");
+    }
+
+    // Share PDF bytes via Android share sheet
+    private void sharePdfBytes(byte[] pdfBytes, String fileName) throws Exception {
+        File cacheFile = new File(getCacheDir(), fileName);
+        FileOutputStream fos = new FileOutputStream(cacheFile);
+        fos.write(pdfBytes);
+        fos.close();
+
+        Uri contentUri = FileProvider.getUriForFile(this,
+            getPackageName() + ".fileprovider", cacheFile);
+
+        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+        shareIntent.setType("application/pdf");
+        shareIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        jsLog("sharePdfBytes: sharing " + fileName + " (" + pdfBytes.length + " bytes)");
+        runOnUiThread(() -> startActivity(Intent.createChooser(shareIntent, "Share PDF")));
     }
 }
