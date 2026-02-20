@@ -3,16 +3,16 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-// ── On-screen debug console (tap to toggle, shows last 30 log lines) ──
+// ── On-screen debug console (tap to toggle, shows last 50 log lines) ──
 (function() {
   var debugEl = document.createElement('div');
   debugEl.id = 'debugOverlay';
-  debugEl.style.cssText = 'position:fixed;top:30px;left:0;right:0;max-height:50vh;overflow-y:auto;background:rgba(0,0,0,0.88);color:#0f0;font:11px/1.4 monospace;padding:8px;z-index:99999;display:none;white-space:pre-wrap;word-break:break-all;';
+  debugEl.style.cssText = 'position:fixed;top:0;left:0;right:0;height:55vh;overflow-y:auto;background:rgba(0,0,0,0.92);color:#0f0;font:13px/1.5 monospace;padding:10px;z-index:99999;display:none;white-space:pre-wrap;word-break:break-all;-webkit-overflow-scrolling:touch;';
   document.body.appendChild(debugEl);
 
   var debugBtn = document.createElement('div');
   debugBtn.textContent = 'DBG';
-  debugBtn.style.cssText = 'position:fixed;top:4px;right:4px;background:rgba(255,0,0,0.7);color:#fff;font:bold 10px sans-serif;padding:3px 6px;border-radius:8px;z-index:100000;cursor:pointer;';
+  debugBtn.style.cssText = 'position:fixed;top:6px;right:6px;background:rgba(255,0,0,0.8);color:#fff;font:bold 12px sans-serif;padding:5px 10px;border-radius:10px;z-index:100000;cursor:pointer;';
   debugBtn.addEventListener('click', function() {
     debugEl.style.display = debugEl.style.display === 'none' ? 'block' : 'none';
   });
@@ -27,7 +27,7 @@ if ('serviceWorker' in navigator) {
     }
     var line = prefix + parts.join(' ');
     logLines.push(line);
-    if (logLines.length > 30) logLines.shift();
+    if (logLines.length > 50) logLines.shift();
     debugEl.textContent = logLines.join('\n');
     debugEl.scrollTop = debugEl.scrollHeight;
   }
@@ -83,6 +83,17 @@ document.addEventListener('DOMContentLoaded', () => {
   var eraserEnabled = false;
   var eraserEverUsed = false; // tracks if eraser was used on current file
 
+  // ── Log available AndroidBridge methods for diagnostics ──
+  if (window.AndroidBridge) {
+    var bridgeMethods = [];
+    for (var k in window.AndroidBridge) {
+      try { bridgeMethods.push(k + '(' + typeof window.AndroidBridge[k] + ')'); } catch(e) { bridgeMethods.push(k + '(err)'); }
+    }
+    console.log('[BRIDGE] methods: ' + (bridgeMethods.length ? bridgeMethods.join(', ') : 'NONE found'));
+  } else {
+    console.log('[BRIDGE] AndroidBridge not present (web browser mode)');
+  }
+
   // ── Printer status ──
   // Android app: green/red blink based on actual WiFi detection
   // Web browser: neutral gray (browser print dialog picks printer)
@@ -101,8 +112,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function checkPrinter() {
-    if (window.AndroidBridge && typeof window.AndroidBridge.isPrinterConnected === 'function') {
-      updatePrinterStatus(window.AndroidBridge.isPrinterConnected() ? 'connected' : 'disconnected');
+    if (window.AndroidBridge) {
+      try {
+        updatePrinterStatus(window.AndroidBridge.isPrinterConnected() ? 'connected' : 'disconnected');
+      } catch(e) {
+        updatePrinterStatus('neutral');
+      }
     } else {
       updatePrinterStatus('neutral');
     }
@@ -121,10 +136,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (printerBar) {
     printerBar.style.cursor = 'pointer';
     printerBar.addEventListener('click', function() {
-      if (window.AndroidBridge && typeof window.AndroidBridge.rediscoverPrinter === 'function') {
-        console.log('[PRINT-DEBUG] Tapped printer bar → rediscoverPrinter()');
-        window.AndroidBridge.rediscoverPrinter();
-        printerText.textContent = 'Searching...';
+      if (window.AndroidBridge) {
+        try {
+          console.log('[PRINT-DEBUG] Tapped printer bar → rediscoverPrinter()');
+          window.AndroidBridge.rediscoverPrinter();
+          printerText.textContent = 'Searching...';
+        } catch(e) { console.log('[PRINT-DEBUG] rediscoverPrinter failed: ' + e.message); }
       }
     });
   }
@@ -807,8 +824,9 @@ document.addEventListener('DOMContentLoaded', () => {
   openFileBtn.addEventListener('click', function() {
     console.log('Open File button clicked');
     // Use native Android file picker if available (WebView fileInput.click() is unreliable)
-    if (window.AndroidBridge && typeof window.AndroidBridge.openFilePicker === 'function') {
-      window.AndroidBridge.openFilePicker();
+    if (window.AndroidBridge) {
+      try { window.AndroidBridge.openFilePicker(); }
+      catch(e) { console.log('[FILE] openFilePicker failed: ' + e.message); fileInput.click(); }
     } else {
       fileInput.click();
     }
@@ -1035,47 +1053,66 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[EXPORT] All bridge methods failed, falling through to web path');
       }
 
-      // ── Web path (browser / GitHub Pages) ──
+      // ── Web path (browser / GitHub Pages / WebView fallback) ──
       console.log('[EXPORT] Web path: building PDF from ' + selectedImgs.length + ' images');
       var pdfBytes = buildPdfFromImages(selectedImgs);
       var blob = new Blob([pdfBytes], { type: 'application/pdf' });
       var fileName = 'print-document-' + Date.now() + '.pdf';
       console.log('[EXPORT] PDF blob created: ' + blob.size + ' bytes, fileName=' + fileName);
 
-      if (action === 'download' || !navigator.share) {
-        // Trigger browser download (also used as share fallback)
-        if (action === 'share') console.log('[EXPORT] Web Share API not available, downloading instead');
-        var url = URL.createObjectURL(blob);
+      // Helper: convert blob to base64 data URL
+      function blobToDataUrl(b, cb) {
+        var reader = new FileReader();
+        reader.onloadend = function() { cb(reader.result); };
+        reader.readAsDataURL(b);
+      }
+
+      // Helper: trigger download using best available method
+      function triggerDownload(b, name) {
+        // Method 1: <a> download (works in browsers, not in most WebViews)
+        var url = URL.createObjectURL(b);
         var a = document.createElement('a');
         a.href = url;
-        a.download = fileName;
+        a.download = name;
+        a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
-        console.log('[EXPORT] Download triggered');
-      } else {
-        // Share via Web Share API
+        console.log('[EXPORT] Tried <a>.click() download');
+
+        // Method 2: window.open with blob URL (triggers WebView DownloadListener)
+        setTimeout(function() {
+          try {
+            var w = window.open(url, '_blank');
+            if (w) { console.log('[EXPORT] window.open(blobUrl) OK'); }
+            else { console.log('[EXPORT] window.open blocked, trying data URL'); }
+          } catch(e) {
+            console.log('[EXPORT] window.open failed: ' + e.message);
+          }
+        }, 300);
+
+        setTimeout(function() { URL.revokeObjectURL(url); }, 10000);
+      }
+
+      if (action === 'share' && navigator.share) {
+        // Share via Web Share API (Chrome, modern browsers)
         var file = new File([blob], fileName, { type: 'application/pdf' });
         var shareData = { files: [file], title: 'Print Document' };
         if (navigator.canShare && navigator.canShare(shareData)) {
           navigator.share(shareData).then(function() {
             console.log('[EXPORT] Share completed');
           }).catch(function(err) {
-            console.log('[EXPORT] Share cancelled/failed: ' + err.message);
+            console.log('[EXPORT] Share failed: ' + err.message + ', downloading instead');
+            triggerDownload(blob, fileName);
           });
         } else {
           console.log('[EXPORT] canShare false, downloading instead');
-          var url2 = URL.createObjectURL(blob);
-          var a2 = document.createElement('a');
-          a2.href = url2;
-          a2.download = fileName;
-          document.body.appendChild(a2);
-          a2.click();
-          document.body.removeChild(a2);
-          setTimeout(function() { URL.revokeObjectURL(url2); }, 5000);
-          console.log('[EXPORT] Download triggered (share fallback)');
+          triggerDownload(blob, fileName);
         }
+      } else {
+        // Download (or share fallback)
+        if (action === 'share') console.log('[EXPORT] Web Share API not available, downloading instead');
+        triggerDownload(blob, fileName);
       }
     } catch (err) {
       console.error('[EXPORT] ' + action + ' ERROR: ' + err.message + '\n' + err.stack);
