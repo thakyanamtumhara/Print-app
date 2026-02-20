@@ -3,6 +3,41 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
+// ── On-screen debug console (tap to toggle, shows last 30 log lines) ──
+(function() {
+  var debugEl = document.createElement('div');
+  debugEl.id = 'debugOverlay';
+  debugEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;max-height:40vh;overflow-y:auto;background:rgba(0,0,0,0.88);color:#0f0;font:11px/1.4 monospace;padding:8px;z-index:99999;display:none;white-space:pre-wrap;word-break:break-all;';
+  document.body.appendChild(debugEl);
+
+  var debugBtn = document.createElement('div');
+  debugBtn.textContent = 'DBG';
+  debugBtn.style.cssText = 'position:fixed;top:4px;right:4px;background:rgba(255,0,0,0.7);color:#fff;font:bold 10px sans-serif;padding:3px 6px;border-radius:8px;z-index:100000;cursor:pointer;';
+  debugBtn.addEventListener('click', function() {
+    debugEl.style.display = debugEl.style.display === 'none' ? 'block' : 'none';
+  });
+  document.body.appendChild(debugBtn);
+
+  var logLines = [];
+  function addLine(prefix, args) {
+    var parts = [];
+    for (var i = 0; i < args.length; i++) {
+      try { parts.push(typeof args[i] === 'object' ? JSON.stringify(args[i]) : String(args[i])); }
+      catch(e) { parts.push('[obj]'); }
+    }
+    var line = prefix + parts.join(' ');
+    logLines.push(line);
+    if (logLines.length > 30) logLines.shift();
+    debugEl.textContent = logLines.join('\n');
+    debugEl.scrollTop = debugEl.scrollHeight;
+  }
+
+  var origLog = console.log, origErr = console.error, origWarn = console.warn;
+  console.log = function() { origLog.apply(console, arguments); addLine('', arguments); };
+  console.error = function() { origErr.apply(console, arguments); addLine('ERR ', arguments); };
+  console.warn = function() { origWarn.apply(console, arguments); addLine('WRN ', arguments); };
+})();
+
 // ── Global error handler (visible in logcat via console.error) ──
 window.onerror = function(msg, url, line, col, err) {
   console.error('JS Error: ' + msg + ' at ' + url + ':' + line + ':' + col);
