@@ -1007,23 +1007,29 @@ document.addEventListener('DOMContentLoaded', () => {
           + ' hasOriginal=' + hasOriginal + ' useOriginal=' + useOriginal);
 
         if (action === 'download') {
-          if (useOriginal) {
+          if (useOriginal && typeof window.AndroidBridge.downloadOriginalPdf === 'function') {
             console.log('[EXPORT] calling downloadOriginalPdf()');
             window.AndroidBridge.downloadOriginalPdf();
-          } else {
+          } else if (typeof window.AndroidBridge.downloadPdf === 'function') {
             console.log('[EXPORT] calling downloadPdf() with ' + selectedImgs.length + ' images');
             window.AndroidBridge.downloadPdf(JSON.stringify(selectedImgs));
+          } else {
+            console.log('[EXPORT] AndroidBridge download methods not available, falling back to web path');
+            isAndroid = false;
           }
         } else {
-          if (useOriginal) {
+          if (useOriginal && typeof window.AndroidBridge.shareOriginalPdf === 'function') {
             console.log('[EXPORT] calling shareOriginalPdf()');
             window.AndroidBridge.shareOriginalPdf();
-          } else {
+          } else if (typeof window.AndroidBridge.sharePdf === 'function') {
             console.log('[EXPORT] calling sharePdf() with ' + selectedImgs.length + ' images');
             window.AndroidBridge.sharePdf(JSON.stringify(selectedImgs));
+          } else {
+            console.log('[EXPORT] AndroidBridge share methods not available, falling back to web path');
+            isAndroid = false;
           }
         }
-        return;
+        if (isAndroid) return;
       }
 
       // ── Web path (browser / GitHub Pages) ──
