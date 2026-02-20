@@ -7,7 +7,7 @@ if ('serviceWorker' in navigator) {
 (function() {
   var debugEl = document.createElement('div');
   debugEl.id = 'debugOverlay';
-  debugEl.style.cssText = 'position:fixed;bottom:0;left:0;right:0;max-height:40vh;overflow-y:auto;background:rgba(0,0,0,0.88);color:#0f0;font:11px/1.4 monospace;padding:8px;z-index:99999;display:none;white-space:pre-wrap;word-break:break-all;';
+  debugEl.style.cssText = 'position:fixed;top:30px;left:0;right:0;max-height:50vh;overflow-y:auto;background:rgba(0,0,0,0.88);color:#0f0;font:11px/1.4 monospace;padding:8px;z-index:99999;display:none;white-space:pre-wrap;word-break:break-all;';
   document.body.appendChild(debugEl);
 
   var debugBtn = document.createElement('div');
@@ -997,39 +997,42 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // ── Android path ──
+      // ── Android path (try/catch because typeof is unreliable for bridge methods) ──
       if (isAndroid) {
         var allSelected = selectedImgs.length === pageImages.length;
-        var hasOriginal = window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf();
+        var hasOriginal = false;
+        try { hasOriginal = window.AndroidBridge.hasOriginalPdf(); } catch(e) {}
         var useOriginal = !hadEraser && allSelected && contentType === 'pdf' && hasOriginal;
 
         console.log('[EXPORT] Android path: allSelected=' + allSelected
           + ' hasOriginal=' + hasOriginal + ' useOriginal=' + useOriginal);
 
+        var bridgeHandled = false;
         if (action === 'download') {
-          if (useOriginal && typeof window.AndroidBridge.downloadOriginalPdf === 'function') {
-            console.log('[EXPORT] calling downloadOriginalPdf()');
-            window.AndroidBridge.downloadOriginalPdf();
-          } else if (typeof window.AndroidBridge.downloadPdf === 'function') {
-            console.log('[EXPORT] calling downloadPdf() with ' + selectedImgs.length + ' images');
-            window.AndroidBridge.downloadPdf(JSON.stringify(selectedImgs));
-          } else {
-            console.log('[EXPORT] AndroidBridge download methods not available, falling back to web path');
-            isAndroid = false;
+          if (useOriginal) {
+            try { window.AndroidBridge.downloadOriginalPdf(); bridgeHandled = true;
+              console.log('[EXPORT] downloadOriginalPdf() OK'); } catch(e) {
+              console.log('[EXPORT] downloadOriginalPdf() failed: ' + e.message); }
+          }
+          if (!bridgeHandled) {
+            try { window.AndroidBridge.downloadPdf(JSON.stringify(selectedImgs)); bridgeHandled = true;
+              console.log('[EXPORT] downloadPdf() OK'); } catch(e) {
+              console.log('[EXPORT] downloadPdf() failed: ' + e.message); }
           }
         } else {
-          if (useOriginal && typeof window.AndroidBridge.shareOriginalPdf === 'function') {
-            console.log('[EXPORT] calling shareOriginalPdf()');
-            window.AndroidBridge.shareOriginalPdf();
-          } else if (typeof window.AndroidBridge.sharePdf === 'function') {
-            console.log('[EXPORT] calling sharePdf() with ' + selectedImgs.length + ' images');
-            window.AndroidBridge.sharePdf(JSON.stringify(selectedImgs));
-          } else {
-            console.log('[EXPORT] AndroidBridge share methods not available, falling back to web path');
-            isAndroid = false;
+          if (useOriginal) {
+            try { window.AndroidBridge.shareOriginalPdf(); bridgeHandled = true;
+              console.log('[EXPORT] shareOriginalPdf() OK'); } catch(e) {
+              console.log('[EXPORT] shareOriginalPdf() failed: ' + e.message); }
+          }
+          if (!bridgeHandled) {
+            try { window.AndroidBridge.sharePdf(JSON.stringify(selectedImgs)); bridgeHandled = true;
+              console.log('[EXPORT] sharePdf() OK'); } catch(e) {
+              console.log('[EXPORT] sharePdf() failed: ' + e.message); }
           }
         }
-        if (isAndroid) return;
+        if (bridgeHandled) return;
+        console.log('[EXPORT] All bridge methods failed, falling through to web path');
       }
 
       // ── Web path (browser / GitHub Pages) ──
@@ -1039,8 +1042,9 @@ document.addEventListener('DOMContentLoaded', () => {
       var fileName = 'print-document-' + Date.now() + '.pdf';
       console.log('[EXPORT] PDF blob created: ' + blob.size + ' bytes, fileName=' + fileName);
 
-      if (action === 'download') {
-        // Trigger browser download
+      if (action === 'download' || !navigator.share) {
+        // Trigger browser download (also used as share fallback)
+        if (action === 'share') console.log('[EXPORT] Web Share API not available, downloading instead');
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
         a.href = url;
@@ -1052,24 +1056,25 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[EXPORT] Download triggered');
       } else {
         // Share via Web Share API
-        if (navigator.share && navigator.canShare) {
-          var file = new File([blob], fileName, { type: 'application/pdf' });
-          var shareData = { files: [file], title: 'Print Document' };
-          if (navigator.canShare(shareData)) {
-            navigator.share(shareData).then(function() {
-              console.log('[EXPORT] Share completed');
-            }).catch(function(err) {
-              console.log('[EXPORT] Share cancelled/failed: ' + err.message);
-            });
-          } else {
-            console.log('[EXPORT] canShare returned false, falling back to download');
-            alert('Sharing not supported on this device. Downloading instead.');
-            exportPdf('download');
-          }
+        var file = new File([blob], fileName, { type: 'application/pdf' });
+        var shareData = { files: [file], title: 'Print Document' };
+        if (navigator.canShare && navigator.canShare(shareData)) {
+          navigator.share(shareData).then(function() {
+            console.log('[EXPORT] Share completed');
+          }).catch(function(err) {
+            console.log('[EXPORT] Share cancelled/failed: ' + err.message);
+          });
         } else {
-          console.log('[EXPORT] Web Share API not available, falling back to download');
-          alert('Share not available in this browser. Downloading instead.');
-          exportPdf('download');
+          console.log('[EXPORT] canShare false, downloading instead');
+          var url2 = URL.createObjectURL(blob);
+          var a2 = document.createElement('a');
+          a2.href = url2;
+          a2.download = fileName;
+          document.body.appendChild(a2);
+          a2.click();
+          document.body.removeChild(a2);
+          setTimeout(function() { URL.revokeObjectURL(url2); }, 5000);
+          console.log('[EXPORT] Download triggered (share fallback)');
         }
       }
     } catch (err) {
