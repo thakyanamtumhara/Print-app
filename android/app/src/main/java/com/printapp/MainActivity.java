@@ -1533,8 +1533,9 @@ public class MainActivity extends AppCompatActivity {
             }
             new Thread(() -> {
                 try {
-                    String fileName = currentFileName != null ? currentFileName : "Print.pdf";
-                    if (!fileName.toLowerCase().endsWith(".pdf")) fileName += ".pdf";
+                    String fn = currentFileName != null ? currentFileName : "Print.pdf";
+                    if (!fn.toLowerCase().endsWith(".pdf")) fn += ".pdf";
+                    final String fileName = fn;
                     jsLog("downloadOriginalPdf: saving " + pdfBytes.length + " bytes as " + fileName);
                     savePdfToDownloads(pdfBytes, fileName);
                     jsLog("downloadOriginalPdf: SUCCESS saved " + fileName);
