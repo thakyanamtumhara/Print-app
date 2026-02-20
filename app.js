@@ -1036,8 +1036,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         Promise.all(imgPromises).then(function(images) {
           var composited = [];
-          var sheetW = 1240;
-          var sheetH = 1754;
+          var sheetW = 4960;  // A4 width at 600 DPI
+          var sheetH = 7016;  // A4 height at 600 DPI
           for (var i = 0; i < images.length; i += layout) {
             var count = Math.min(layout, images.length - i);
             var cols, rows;
