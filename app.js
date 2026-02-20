@@ -7,7 +7,7 @@ if ('serviceWorker' in navigator) {
 (function() {
   var debugEl = document.createElement('div');
   debugEl.id = 'debugOverlay';
-  debugEl.style.cssText = 'position:fixed;top:0;left:0;right:0;height:55vh;overflow-y:auto;background:rgba(0,0,0,0.92);color:#0f0;font:13px/1.5 monospace;padding:10px;z-index:99999;display:none;white-space:pre-wrap;word-break:break-all;-webkit-overflow-scrolling:touch;';
+  debugEl.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:40%;overflow-y:auto;background:rgba(0,0,0,0.92);color:#0f0;font:14px/1.6 monospace;padding:12px;z-index:99999;display:none;white-space:pre-wrap;word-break:break-all;-webkit-overflow-scrolling:touch;';
   document.body.appendChild(debugEl);
 
   var debugBtn = document.createElement('div');
