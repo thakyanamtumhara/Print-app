@@ -1,4 +1,4 @@
-var CACHE_NAME = 'print-v12';
+var CACHE_NAME = 'print-v17';
 var ASSETS = [
   '/Print-app/',
   '/Print-app/index.html',
