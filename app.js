@@ -1241,7 +1241,20 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Method 3: #printdata=JSON — base64 data in URL hash
+    // Method 3: ?printdata=JSON — base64 data in query param (intent:// compatible)
+    if (params.get('printdata')) {
+      try {
+        var data = JSON.parse(params.get('printdata'));
+        console.log('[PRINT-APP] Loading from printdata query param:', data.fileName);
+        displayFileFromBase64(data.fileName, data.mimeType, data.base64Data);
+      } catch (e) {
+        console.error('[PRINT-APP] printdata parse error:', e);
+      }
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
+    // Method 4: #printdata=JSON — base64 data in URL hash (legacy fallback)
     if (hash && hash.indexOf('#printdata=') === 0) {
       try {
         var jsonStr = decodeURIComponent(hash.substring('#printdata='.length));
