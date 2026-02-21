@@ -7,6 +7,7 @@
 
 html, body {
   height: 100%;
+  overscroll-behavior: none;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   background: #f2f2f7;
   -webkit-font-smoothing: antialiased;
@@ -27,7 +28,9 @@ html, body {
   flex: 1;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 16px 20px 8px;
+  padding: 12px 16px 8px;
+  min-height: 0;
+  touch-action: pan-x pan-y; /* allow scroll/pan, block browser zoom — JS handles pinch */
 }
 
 .preview-wrapper {
@@ -167,13 +170,20 @@ html, body {
   color: #666;
 }
 
+/* ── Sticky Bottom Bar ── */
+.bottom-bar {
+  flex-shrink: 0;
+  background: #f2f2f7;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
 /* ── Printer Info Bar ── */
 .printer-bar {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 16px 10px;
-  padding: 10px 14px;
+  margin: 0 16px 8px;
+  padding: 8px 14px;
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -210,46 +220,13 @@ html, body {
   line-height: 1.3;
 }
 
-/* ── Eraser Toolbar ── */
-.eraser-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 16px;
-}
-
-.eraser-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: #e5e5ea;
-  border: none;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #8e8e93;
-  cursor: pointer;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.eraser-toggle.active {
-  background: #007aff;
-  color: #fff;
-}
-
-.eraser-toggle svg {
-  flex-shrink: 0;
-}
-
 /* ── Eraser Thickness Bar ── */
 .thickness-bar {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 12px;
+  padding: 8px 16px;
 }
 
 .thick-btn {
@@ -275,10 +252,36 @@ html, body {
   background: #555;
 }
 
+/* ── Action Buttons Container ── */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── Open File Icon Button ── */
+.open-file-icon {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f2f2f7;
+  border: 1.5px solid #d1d1d6;
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.open-file-icon:active {
+  background: #e5e5ea;
+}
+
 /* ── Settings Section ── */
 .settings-section {
   background: #fff;
-  margin: 0 16px 12px;
+  margin: 0 16px 8px;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -346,56 +349,9 @@ html, body {
   stroke: #007aff;
 }
 
-/* Copies control */
-.copies-control {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  background: #f2f2f7;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.copies-btn {
-  width: 36px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  font-size: 20px;
-  font-weight: 500;
-  color: #007aff;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.15s;
-}
-
-.copies-btn:active {
-  background: rgba(0, 122, 255, 0.12);
-}
-
-.copies-btn:disabled {
-  color: #c7c7cc;
-  cursor: default;
-}
-
-.copies-btn:disabled:active {
-  background: transparent;
-}
-
-.copies-value {
-  min-width: 28px;
-  text-align: center;
-  font-size: 15px;
-  font-weight: 600;
-  color: #222;
-}
-
 /* ── Print Button ── */
 .print-btn-container {
-  padding: 8px 16px 28px;
+  padding: 8px 16px 12px;
 }
 
 .print-btn {
@@ -412,11 +368,22 @@ html, body {
   border-radius: 14px;
   cursor: pointer;
   letter-spacing: -0.1px;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.1s;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
 }
 
-.print-btn:active {
-  background: #0062d1;
+.print-btn:active,
+.print-btn.print-btn-pressed {
+  background: #0056b8;
+  transform: scale(0.96);
+  box-shadow: 0 1px 3px rgba(0, 122, 255, 0.2);
+}
+
+.print-btn:disabled {
+  background: #a0c4f5;
+  box-shadow: none;
+  cursor: default;
+  transform: none;
 }
 
 /* ── Preview Sheet Layout (in-app live preview) ── */
@@ -460,6 +427,10 @@ html, body {
   grid-template-rows: 1fr 1fr;
 }
 
+.preview-sheet.preview-sheet-landscape {
+  aspect-ratio: 297 / 210;
+}
+
 .preview-tile {
   overflow: hidden;
   border-radius: 3px;
@@ -477,6 +448,111 @@ html, body {
   font-size: 11px;
   color: #8e8e93;
   margin-top: -8px;
+}
+
+/* ── Page Selector Strip (thumbnails with checkmarks) ── */
+.page-selector-strip {
+  display: flex;
+  gap: 8px;
+  padding: 8px 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.page-thumb {
+  position: relative;
+  width: 52px;
+  min-width: 52px;
+  aspect-ratio: 210 / 297;
+  border: 2px solid #007aff;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.page-thumb.page-thumb-landscape {
+  aspect-ratio: 297 / 210;
+  width: 74px;
+  min-width: 74px;
+}
+
+.page-thumb:not(.selected) {
+  border-color: #ccc;
+  opacity: 0.4;
+}
+
+.page-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.page-check {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #007aff;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.page-thumb:not(.selected) .page-check {
+  background: #ccc;
+}
+
+.page-thumb-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 9px;
+  color: #fff;
+  background: rgba(0,0,0,0.45);
+  padding: 1px 0;
+}
+
+/* ── Eraser Toggle Button ── */
+.eraser-toggle {
+  position: fixed;
+  bottom: 180px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid #d1d1d6;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.eraser-toggle.active {
+  background: #007aff;
+  border-color: #007aff;
+}
+
+.eraser-toggle svg {
+  transition: stroke 0.15s;
+}
+
+.eraser-toggle.active svg {
+  stroke: #fff;
 }
 
 /* ── Hidden Print Area ── */

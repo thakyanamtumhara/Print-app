@@ -1,11 +1,11 @@
-var CACHE_NAME = 'iprint-v10';
+var CACHE_NAME = 'print-v13';
 var ASSETS = [
-  '/Print-app/',
-  '/Print-app/index.html',
-  '/Print-app/styles.css',
-  '/Print-app/app.js',
-  '/Print-app/icon-192.png',
-  '/Print-app/icon-512.png'
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 // Install – cache app shell
