@@ -1257,7 +1257,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (params.get('pdfurl')) {
       var rawUrl = params.get('pdfurl');
       var fileName = params.get('name') || 'document.pdf';
-      var PROXY = 'https://script.google.com/macros/s/AKfycbw_WEfW_zsnGqk5qgHE_qImzGD_d8gXB-YatMhqeDRs75mIktKJXptH5KjxV4tvfr0/exec';
+      var PROXY = 'https://script.google.com/macros/s/AKfycbyI4v1EY6FwB6-Gsh3pT5fWIQe5WQIOtLMyu-1Z4DB_7__WOCb71Re9La6Cz94OCxV-/exec';
       var proxyUrl = PROXY + '?url=' + encodeURIComponent(rawUrl);
       console.log('[PRINT-APP] Loading from pdfurl via proxy:', fileName);
       fetchProxyAndDisplay(fileName, proxyUrl);
