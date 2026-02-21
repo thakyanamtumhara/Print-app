@@ -210,8 +210,16 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Load PWA
-        webView.loadUrl(PWA_URL);
+        // Load PWA — check if launched via deep link with URL params
+        Uri intentData = getIntent().getData();
+        if (intentData != null && intentData.getHost() != null
+            && intentData.getHost().equals("thakyanamtumhara.github.io")) {
+            // Deep link from Dashboard — load full URL with query params
+            Log.d(TAG, "Deep link launch: " + intentData.toString());
+            webView.loadUrl(intentData.toString());
+        } else {
+            webView.loadUrl(PWA_URL);
+        }
 
         // Handle incoming file intent
         handleIncomingIntent(getIntent());
@@ -443,6 +451,17 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        setIntent(intent);
+
+        // Deep link when app is already running — reload WebView with new URL params
+        Uri intentData = intent.getData();
+        if (intentData != null && intentData.getHost() != null
+            && intentData.getHost().equals("thakyanamtumhara.github.io")) {
+            Log.d(TAG, "Deep link (app running): " + intentData.toString());
+            webView.loadUrl(intentData.toString());
+            return;
+        }
+
         handleIncomingIntent(intent);
     }
 

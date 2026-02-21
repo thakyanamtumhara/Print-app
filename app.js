@@ -1215,4 +1215,115 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // ── Load file from URL params (deep links from Dashboard) ──
+  (function checkUrlParams() {
+    var params = new URLSearchParams(window.location.search);
+    var hash = window.location.hash;
+
+    // Method 1: ?proxy=PROXY_URL&name=FILENAME — fetch PDF via CORS proxy
+    if (params.get('proxy')) {
+      var proxyUrl = params.get('proxy');
+      var fileName = params.get('name') || 'document.pdf';
+      console.log('[PRINT-APP] Loading from proxy URL:', fileName);
+      fetchProxyAndDisplay(fileName, proxyUrl);
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
+    // Method 2: ?url=DIRECT_URL&name=FILENAME — fetch URL directly
+    if (params.get('url')) {
+      var fileUrl = params.get('url');
+      var fileName = params.get('name') || 'document.pdf';
+      console.log('[PRINT-APP] Loading from URL:', fileName);
+      fetchAndDisplayUrl(fileName, fileUrl);
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
+    // Method 3: #printdata=JSON — base64 data in URL hash
+    if (hash && hash.indexOf('#printdata=') === 0) {
+      try {
+        var jsonStr = decodeURIComponent(hash.substring('#printdata='.length));
+        var data = JSON.parse(jsonStr);
+        console.log('[PRINT-APP] Loading from hash:', data.fileName);
+        displayFileFromBase64(data.fileName, data.mimeType, data.base64Data);
+      } catch (e) {
+        console.error('[PRINT-APP] Hash parse error:', e);
+      }
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+  })();
+
+  // ── Fetch PDF via CORS proxy (returns JSON with base64) ──
+  function fetchProxyAndDisplay(fileName, proxyUrl) {
+    console.log('[PRINT-APP] fetchProxyAndDisplay:', fileName);
+    labelContainer.innerHTML = '<div style="padding:16px;text-align:center;color:#888;font-size:14px">Loading...</div>';
+
+    fetch(proxyUrl)
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function(data) {
+        if (data.error) throw new Error('Proxy: ' + data.error);
+        console.log('[PRINT-APP] Proxy returned: size=' + data.size);
+        displayFileFromBase64(fileName, 'application/pdf', data.base64);
+      })
+      .catch(function(e) {
+        console.error('[PRINT-APP] Proxy fetch failed:', e.message);
+        labelContainer.innerHTML =
+          '<div style="padding:32px 16px;text-align:center;color:#c00">' +
+          '<div style="font-size:15px;font-weight:600">Could not load PDF</div>' +
+          '<div style="font-size:13px;margin-top:4px;color:#888">' + e.message + '</div></div>';
+      });
+  }
+
+  // ── Fetch file from direct URL and display ──
+  function fetchAndDisplayUrl(fileName, fileUrl) {
+    console.log('[PRINT-APP] fetchAndDisplayUrl:', fileName, fileUrl);
+    labelContainer.innerHTML = '<div style="padding:16px;text-align:center;color:#888;font-size:14px">Loading...</div>';
+
+    fetch(fileUrl)
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.arrayBuffer();
+      })
+      .then(function(buffer) {
+        var bytes = new Uint8Array(buffer);
+        var isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+        if (isPdf) {
+          console.log('[PRINT-APP] URL fetched as PDF, size=' + bytes.length);
+          renderPdfPages({ data: bytes });
+        } else {
+          // Try as image
+          var blob = new Blob([buffer]);
+          var url = URL.createObjectURL(blob);
+          var img = new Image();
+          img.onload = function() {
+            var canvas = document.createElement('canvas');
+            canvas.width = img.width; canvas.height = img.height;
+            canvas.getContext('2d').drawImage(img, 0, 0);
+            var dataUrl = canvas.toDataURL('image/png');
+            var b64 = dataUrl.split(',')[1];
+            URL.revokeObjectURL(url);
+            displayFileFromBase64(fileName, 'image/png', b64);
+          };
+          img.onerror = function() {
+            URL.revokeObjectURL(url);
+            console.error('[PRINT-APP] URL content is neither PDF nor image');
+            labelContainer.innerHTML = '<div style="padding:32px;text-align:center;color:#c00">Could not load file from URL</div>';
+          };
+          img.src = url;
+        }
+      })
+      .catch(function(e) {
+        console.error('[PRINT-APP] Direct fetch failed:', e.message);
+        labelContainer.innerHTML =
+          '<div style="padding:32px 16px;text-align:center;color:#c00">' +
+          '<div style="font-size:15px;font-weight:600">Load failed</div>' +
+          '<div style="font-size:13px;margin-top:4px;color:#888">' + e.message + '</div></div>';
+      });
+  }
 });
