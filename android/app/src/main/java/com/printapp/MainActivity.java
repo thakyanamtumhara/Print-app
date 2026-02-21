@@ -613,8 +613,9 @@ public class MainActivity extends AppCompatActivity {
      */
     private void handlePrintDataExtra(String encodedData) {
         try {
-            String jsonStr = java.net.URLDecoder.decode(encodedData, "UTF-8");
-            org.json.JSONObject json = new org.json.JSONObject(jsonStr);
+            // Android's intent parser already decodes %XX in S.key=value extras.
+            // Do NOT use URLDecoder.decode — it converts '+' to space, corrupting base64.
+            org.json.JSONObject json = new org.json.JSONObject(encodedData);
             String fileName = json.getString("fileName");
             String mimeType = json.getString("mimeType");
             String base64Data = json.getString("base64Data");
