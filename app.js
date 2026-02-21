@@ -1243,11 +1243,23 @@ document.addEventListener('DOMContentLoaded', () => {
     var params = new URLSearchParams(window.location.search);
     var hash = window.location.hash;
 
-    // Method 1: ?proxy=PROXY_URL&name=FILENAME — fetch PDF via CORS proxy
+    // Method 1a: ?proxy=PROXY_URL&name=FILENAME — fetch from proxy URL directly
     if (params.get('proxy')) {
       var proxyUrl = params.get('proxy');
       var fileName = params.get('name') || 'document.pdf';
       console.log('[PRINT-APP] Loading from proxy URL:', fileName);
+      fetchProxyAndDisplay(fileName, proxyUrl);
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
+    // Method 1b: ?pdfurl=RAW_PDF_URL&name=FILENAME — fetch PDF via CORS proxy
+    if (params.get('pdfurl')) {
+      var rawUrl = params.get('pdfurl');
+      var fileName = params.get('name') || 'document.pdf';
+      var PROXY = 'https://script.google.com/macros/s/AKfycbw_WEfW_zsnGqk5qgHE_qImzGD_d8gXB-YatMhqeDRs75mIktKJXptH5KjxV4tvfr0/exec';
+      var proxyUrl = PROXY + '?url=' + encodeURIComponent(rawUrl);
+      console.log('[PRINT-APP] Loading from pdfurl via proxy:', fileName);
       fetchProxyAndDisplay(fileName, proxyUrl);
       window.history.replaceState({}, '', window.location.pathname);
       return;
