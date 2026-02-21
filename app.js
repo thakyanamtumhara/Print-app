@@ -809,6 +809,28 @@ document.addEventListener('DOMContentLoaded', () => {
         '</div>';
     } else if (mimeType === 'application/pdf') {
       renderPdfPages({ data: base64ToUint8Array(base64Data) });
+    } else if (mimeType === 'text/html' || mimeType.startsWith('text/html')) {
+      // Render HTML bill in iframe, capture as image for printing
+      contentType = 'label';
+      pageImages = [];
+      pageOrientations = [];
+      try {
+        var html = atob(base64Data);
+        var iframe = document.createElement('iframe');
+        iframe.style.cssText = 'width:380px;min-height:600px;border:1px solid #ddd;background:#fff;display:block;margin:8px auto';
+        labelContainer.innerHTML = '';
+        labelContainer.appendChild(iframe);
+        var doc = iframe.contentDocument || iframe.contentWindow.document;
+        doc.open(); doc.write(html); doc.close();
+        // Auto-resize iframe to content
+        setTimeout(function() {
+          try { iframe.style.height = doc.body.scrollHeight + 'px'; } catch(e) {}
+        }, 300);
+      } catch (e) {
+        console.error('[PRINT-APP] HTML render error:', e);
+        labelContainer.innerHTML =
+          '<div style="padding:32px 16px;text-align:center;color:#c00">HTML render failed: ' + e.message + '</div>';
+      }
     } else {
       contentType = 'label';
       pageImages = [];
