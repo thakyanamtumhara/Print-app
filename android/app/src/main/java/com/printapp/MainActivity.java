@@ -611,11 +611,21 @@ public class MainActivity extends AppCompatActivity {
      * Handle printdata from intent extra (sent by Dashboard via S.printdata=...).
      * Parses JSON {fileName, mimeType, base64Data} and injects into WebView.
      */
-    private void handlePrintDataExtra(String encodedData) {
+    private void handlePrintDataExtra(String rawData) {
         try {
-            // Android's intent parser already decodes %XX in S.key=value extras.
-            // Do NOT use URLDecoder.decode — it converts '+' to space, corrupting base64.
-            org.json.JSONObject json = new org.json.JSONObject(encodedData);
+            // Android may or may not decode %XX in S.key=value extras.
+            // Try parsing as JSON directly first; if that fails, decode %XX manually
+            // (but preserve '+' — it's valid base64, NOT a space).
+            String jsonStr = rawData;
+            if (!rawData.startsWith("{")) {
+                // Still percent-encoded — decode %XX but keep '+' as '+'
+                jsonStr = rawData.replace("+", "__PLUS__");
+                jsonStr = java.net.URLDecoder.decode(jsonStr, "UTF-8");
+                jsonStr = jsonStr.replace("__PLUS__", "+");
+            }
+            Log.d(TAG, "handlePrintDataExtra: jsonStr starts with: " + jsonStr.substring(0, Math.min(80, jsonStr.length())));
+
+            org.json.JSONObject json = new org.json.JSONObject(jsonStr);
             String fileName = json.getString("fileName");
             String mimeType = json.getString("mimeType");
             String base64Data = json.getString("base64Data");
