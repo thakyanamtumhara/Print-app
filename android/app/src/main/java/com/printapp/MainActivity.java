@@ -41,6 +41,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -210,13 +211,23 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Load PWA — check if launched via deep link with URL params
+        // Load PWA — check if launched via deep link
         Uri intentData = getIntent().getData();
+        String printDataExtra = getIntent().getStringExtra("printdata");
+
         if (intentData != null && intentData.getHost() != null
             && intentData.getHost().equals("thakyanamtumhara.github.io")) {
-            // Deep link from Dashboard — load full URL with query params
-            Log.d(TAG, "Deep link launch: " + intentData.toString());
-            webView.loadUrl(intentData.toString());
+            // Deep link from Dashboard
+            if (printDataExtra != null && !printDataExtra.isEmpty()) {
+                // Has printdata extra — load plain PWA, inject data after page loads
+                Log.d(TAG, "Deep link with printdata extra, len=" + printDataExtra.length());
+                webView.loadUrl(PWA_URL);
+                handlePrintDataExtra(printDataExtra);
+            } else {
+                // Has query params (proxy, url) — load full URL
+                Log.d(TAG, "Deep link launch: " + intentData.toString());
+                webView.loadUrl(intentData.toString());
+            }
         } else {
             webView.loadUrl(PWA_URL);
         }
@@ -453,12 +464,21 @@ public class MainActivity extends AppCompatActivity {
         super.onNewIntent(intent);
         setIntent(intent);
 
-        // Deep link when app is already running — reload WebView with new URL params
+        // Deep link when app is already running
         Uri intentData = intent.getData();
+        String printDataExtra = intent.getStringExtra("printdata");
+
         if (intentData != null && intentData.getHost() != null
             && intentData.getHost().equals("thakyanamtumhara.github.io")) {
-            Log.d(TAG, "Deep link (app running): " + intentData.toString());
-            webView.loadUrl(intentData.toString());
+            if (printDataExtra != null && !printDataExtra.isEmpty()) {
+                // Has printdata extra — inject directly (page already loaded)
+                Log.d(TAG, "Deep link (running) with printdata extra, len=" + printDataExtra.length());
+                handlePrintDataExtra(printDataExtra);
+            } else {
+                // Has query params — reload with full URL
+                Log.d(TAG, "Deep link (running): " + intentData.toString());
+                webView.loadUrl(intentData.toString());
+            }
             return;
         }
 
@@ -585,6 +605,38 @@ public class MainActivity extends AppCompatActivity {
         String[] fileData = readFileToBase64(uri);
         if (fileData == null) return;
         injectFileData(fileData[0], fileData[1], fileData[2]);
+    }
+
+    /**
+     * Handle printdata from intent extra (sent by Dashboard via S.printdata=...).
+     * Parses JSON {fileName, mimeType, base64Data} and injects into WebView.
+     */
+    private void handlePrintDataExtra(String encodedData) {
+        try {
+            String jsonStr = java.net.URLDecoder.decode(encodedData, "UTF-8");
+            org.json.JSONObject json = new org.json.JSONObject(jsonStr);
+            String fileName = json.getString("fileName");
+            String mimeType = json.getString("mimeType");
+            String base64Data = json.getString("base64Data");
+            Log.d(TAG, "handlePrintDataExtra: " + fileName + " mimeType=" + mimeType
+                + " base64len=" + base64Data.length());
+
+            // Store original PDF bytes for direct printing
+            if ("application/pdf".equals(mimeType)) {
+                originalPdfBytes = Base64.decode(base64Data, Base64.NO_WRAP);
+                Log.d(TAG, "handlePrintDataExtra: stored " + originalPdfBytes.length + " original PDF bytes");
+            }
+
+            if (pageLoaded) {
+                injectFileData(fileName, mimeType, base64Data);
+            } else {
+                pendingFileName = fileName;
+                pendingMimeType = mimeType;
+                pendingBase64Data = base64Data;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "handlePrintDataExtra failed: " + e.getMessage(), e);
+        }
     }
 
     // ══════════════════════════════════════════
