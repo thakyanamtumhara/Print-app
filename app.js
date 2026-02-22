@@ -593,12 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
       console.log('[PRINT-DEBUG] selectedImgs=' + selectedImgs.length + '/' + pageImages.length + ' layout=' + layout + ' orientations=' + JSON.stringify(pageOrientations));
       buildPrintArea(selectedImgs, layout);
       if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
-        var allSelected = selectedImgs.length === pageImages.length;
-        if (layout === 1 && allSelected && contentType === 'pdf'
-            && window.AndroidBridge.hasOriginalPdf && window.AndroidBridge.hasOriginalPdf()) {
-          console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirectPdf()');
-          window.AndroidBridge.printDirectPdf(1);
-        } else if ((contentType === 'pdf' || contentType === 'image') && selectedImgs.length > 0) {
+        if ((contentType === 'pdf' || contentType === 'image') && selectedImgs.length > 0) {
           console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirect() layout=' + layout
             + ' pages=' + selectedImgs.length);
           window.AndroidBridge.printDirect(JSON.stringify(selectedImgs), layout, 1);
