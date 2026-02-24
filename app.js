@@ -80,6 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var pageOrientations = []; // 'landscape' | 'portrait' per page
   var contentType = 'label'; // 'label' | 'pdf' | 'image'
   var selectedPages = [];  // boolean array — true = page selected for printing
+  var pdfRenderComplete = true; // false while PDF pages are still rendering
   var eraserEnabled = false;
   var eraserEverUsed = false; // tracks if eraser was used on current file
 
@@ -567,12 +568,20 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('[PRINT-DEBUG] Print button clicked. isPrinting=' + isPrinting
       + ' contentType=' + contentType
       + ' pageImages.length=' + pageImages.length
+      + ' pdfRenderComplete=' + pdfRenderComplete
       + ' isAndroid=' + !!(window.AndroidBridge && window.AndroidBridge.isAndroid()));
 
     if (isPrinting) {
       console.log('[PRINT-DEBUG] Print BLOCKED — already printing');
       return;
     }
+
+    // Guard: don't print while PDF is still rendering
+    if (contentType === 'pdf' && !pdfRenderComplete) {
+      console.log('[PRINT-DEBUG] Print BLOCKED — PDF still rendering');
+      return;
+    }
+
     isPrinting = true;
     printBtn.disabled = true;
 
@@ -585,23 +594,44 @@ document.addEventListener('DOMContentLoaded', () => {
       bakeStrokes();
 
       var layout = parseInt(layoutSelect.value, 10);
+      var isAndroid = !!(window.AndroidBridge && window.AndroidBridge.isAndroid());
+
       // Filter to only selected pages
       var selectedImgs = [];
       for (var si = 0; si < pageImages.length; si++) {
         if (selectedPages[si] !== false) selectedImgs.push(pageImages[si]);
       }
       console.log('[PRINT-DEBUG] selectedImgs=' + selectedImgs.length + '/' + pageImages.length + ' layout=' + layout + ' orientations=' + JSON.stringify(pageOrientations));
-      buildPrintArea(selectedImgs, layout);
-      if (window.AndroidBridge && window.AndroidBridge.isAndroid()) {
-        if ((contentType === 'pdf' || contentType === 'image') && selectedImgs.length > 0) {
+
+      // Validate data URLs before sending
+      var validCount = 0;
+      for (var vi = 0; vi < selectedImgs.length; vi++) {
+        if (selectedImgs[vi] && selectedImgs[vi].length > 100 && selectedImgs[vi].indexOf('data:') === 0) {
+          validCount++;
+        } else {
+          console.error('[PRINT-DEBUG] selectedImgs[' + vi + '] INVALID — length='
+            + (selectedImgs[vi] ? selectedImgs[vi].length : 0));
+        }
+      }
+      console.log('[PRINT-DEBUG] validated ' + validCount + '/' + selectedImgs.length + ' images OK');
+
+      if (isAndroid) {
+        if ((contentType === 'pdf' || contentType === 'image') && validCount > 0) {
+          // Android native path: send data URLs directly to native bridge
+          // Do NOT call buildPrintArea — it creates unnecessary hidden DOM copies
+          // of large base64 images, wasting memory and causing intermittent blank pages
           console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirect() layout=' + layout
             + ' pages=' + selectedImgs.length);
           window.AndroidBridge.printDirect(JSON.stringify(selectedImgs), layout, 1);
         } else {
+          // Label path: needs buildPrintArea for the DOM content
+          buildPrintArea(selectedImgs, layout);
           console.log('[PRINT-DEBUG] Calling AndroidBridge.print()');
           window.AndroidBridge.print(1);
         }
       } else {
+        // Browser path: needs buildPrintArea for window.print()
+        buildPrintArea(selectedImgs, layout);
         console.log('[PRINT-DEBUG] Calling window.print() (browser path)');
         window.print();
       }
@@ -689,7 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
       tmpCtx.drawImage(imgEl, 0, 0, tmpCanvas.width, tmpCanvas.height);
       tmpCtx.drawImage(whiteoutCanvas, cx, cy, cw, ch, 0, 0, tmpCanvas.width, tmpCanvas.height);
 
-      pageImages[pageIdx] = tmpCanvas.toDataURL('image/png');
+      pageImages[pageIdx] = tmpCanvas.toDataURL('image/jpeg', 0.98);
       baked[pageIdx] = true;
     }
 
@@ -701,6 +731,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pageImages = [];
     pageOrientations = [];
     contentType = 'pdf';
+    pdfRenderComplete = false;
     var container = document.createElement('div');
     container.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:4px';
     labelContainer.appendChild(container);
@@ -727,6 +758,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('[RENDER] Page ' + num + ': canvas=' + canvas.width + 'x' + canvas.height + ' orient=' + orient);
             pageImages.push(canvas.toDataURL('image/jpeg', 0.98));
             if (num === pdf.numPages) {
+              pdfRenderComplete = true;
+              console.log('[RENDER] All ' + pdf.numPages + ' pages rendered, pdfRenderComplete=true');
               initSelectedPages();
               updatePreviewLayout();
             }
@@ -736,6 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       renderPage(1);
     }).catch(function(err) {
+      pdfRenderComplete = true; // unblock print button even on failure
       labelContainer.innerHTML =
         '<div style="padding:32px 16px;text-align:center;color:#c00">' +
         '<div style="font-size:15px;font-weight:600">Could not load PDF</div>' +
