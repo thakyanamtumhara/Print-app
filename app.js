@@ -3,8 +3,26 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-// ── On-screen debug console (tap to toggle, shows last 50 log lines) ──
+// ── On-screen debug console (tap to toggle, persistent 6-hour log) ──
 (function() {
+  var LOG_KEY = 'dbg_logs';
+  var LOG_MAX = 500;
+  var LOG_TTL = 6 * 60 * 60 * 1000; // 6 hours in ms
+
+  // Restore saved logs, drop entries older than 6 hours
+  function loadLogs() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+      var cutoff = Date.now() - LOG_TTL;
+      return saved.filter(function(e) { return e.t > cutoff; });
+    } catch(e) { return []; }
+  }
+  function saveLogs() {
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(logEntries)); } catch(e) {}
+  }
+
+  var logEntries = loadLogs(); // [{t: timestamp, m: message}]
+
   var debugEl = document.createElement('div');
   debugEl.id = 'debugOverlay';
   debugEl.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:40%;overflow-y:auto;background:rgba(0,0,0,0.92);color:#0f0;font:14px/1.6 monospace;padding:12px;z-index:99999;display:none;white-space:pre-wrap;word-break:break-all;-webkit-overflow-scrolling:touch;';
@@ -15,22 +33,38 @@ if ('serviceWorker' in navigator) {
   debugBtn.style.cssText = 'position:fixed;top:6px;right:6px;background:rgba(255,0,0,0.8);color:#fff;font:bold 12px sans-serif;padding:5px 10px;border-radius:10px;z-index:100000;cursor:pointer;';
   debugBtn.addEventListener('click', function() {
     debugEl.style.display = debugEl.style.display === 'none' ? 'block' : 'none';
+    if (debugEl.style.display === 'block') refreshDisplay();
   });
   document.body.appendChild(debugBtn);
 
-  var logLines = [];
+  function timeStr(ts) {
+    var d = new Date(ts);
+    var hh = ('0' + d.getHours()).slice(-2);
+    var mm = ('0' + d.getMinutes()).slice(-2);
+    var ss = ('0' + d.getSeconds()).slice(-2);
+    return hh + ':' + mm + ':' + ss;
+  }
+
+  function refreshDisplay() {
+    debugEl.textContent = logEntries.map(function(e) { return '[' + timeStr(e.t) + '] ' + e.m; }).join('\n');
+    debugEl.scrollTop = debugEl.scrollHeight;
+  }
+
   function addLine(prefix, args) {
     var parts = [];
     for (var i = 0; i < args.length; i++) {
       try { parts.push(typeof args[i] === 'object' ? JSON.stringify(args[i]) : String(args[i])); }
       catch(e) { parts.push('[obj]'); }
     }
-    var line = prefix + parts.join(' ');
-    logLines.push(line);
-    if (logLines.length > 50) logLines.shift();
-    debugEl.textContent = logLines.join('\n');
-    debugEl.scrollTop = debugEl.scrollHeight;
+    var msg = prefix + parts.join(' ');
+    logEntries.push({ t: Date.now(), m: msg });
+    if (logEntries.length > LOG_MAX) logEntries = logEntries.slice(-LOG_MAX);
+    saveLogs();
+    if (debugEl.style.display !== 'none') refreshDisplay();
   }
+
+  // Show session start marker
+  addLine('', ['━━━ SESSION START ━━━']);
 
   var origLog = console.log, origErr = console.error, origWarn = console.warn;
   console.log = function() { origLog.apply(console, arguments); addLine('', arguments); };
@@ -74,6 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var openFileBtn = document.getElementById('openFileBtn');
   var downloadBtn = document.getElementById('downloadBtn');
   var shareBtn = document.getElementById('shareBtn');
+  var duplexBtn = document.getElementById('duplexBtn');
   var fileInput = document.getElementById('fileInput');
 
   var pageImages = [];     // data-URL per PDF/image page (for printing)
@@ -81,6 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var contentType = 'label'; // 'label' | 'pdf' | 'image'
   var selectedPages = [];  // boolean array — true = page selected for printing
   var pdfRenderComplete = true; // false while PDF pages are still rendering
+  var duplexEnabled = false; // both-side printing
   var eraserEnabled = false;
   var eraserEverUsed = false; // tracks if eraser was used on current file
 
@@ -146,6 +182,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // ── Duplex (both side print) toggle ──
+  duplexBtn.addEventListener('click', function() {
+    duplexEnabled = !duplexEnabled;
+    duplexBtn.classList.toggle('active', duplexEnabled);
+    console.log('[PRINT-DEBUG] Duplex toggled: ' + duplexEnabled);
+  });
 
   // ── Layout change → update in-app preview ──
   layoutSelect.addEventListener('change', function() {
@@ -621,8 +664,8 @@ document.addEventListener('DOMContentLoaded', () => {
           // Do NOT call buildPrintArea — it creates unnecessary hidden DOM copies
           // of large base64 images, wasting memory and causing intermittent blank pages
           console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirect() layout=' + layout
-            + ' pages=' + selectedImgs.length);
-          window.AndroidBridge.printDirect(JSON.stringify(selectedImgs), layout, 1);
+            + ' pages=' + selectedImgs.length + ' duplex=' + duplexEnabled);
+          window.AndroidBridge.printDirect(JSON.stringify(selectedImgs), layout, 1, duplexEnabled);
         } else {
           // Label path: needs buildPrintArea for the DOM content
           buildPrintArea(selectedImgs, layout);

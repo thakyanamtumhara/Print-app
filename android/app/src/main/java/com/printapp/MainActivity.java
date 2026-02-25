@@ -79,6 +79,9 @@ public class MainActivity extends AppCompatActivity {
     private volatile int printerPort = 631;
     private volatile String printerResourcePath = null; // from NSD TXT "rp"
 
+    // ── Duplex (both-side) printing mode ──
+    private volatile boolean duplexMode = false;
+
     // ── Original PDF bytes for direct printing (skip rasterization) ──
     private volatile byte[] originalPdfBytes = null;
 
@@ -761,9 +764,11 @@ public class MainActivity extends AppCompatActivity {
     // ══════════════════════════════════════════
     private void printDirectIPP(String pagesJson, int layout, int copies) {
         Log.d(TAG, "=== printDirectIPP START === layout=" + layout + " copies=" + copies
+            + " duplex=" + duplexMode
             + " printerHost=" + printerHost + " printerPort=" + printerPort
             + " resourcePath=" + printerResourcePath);
         jsLog("=== printDirectIPP START === layout=" + layout + " copies=" + copies
+            + " duplex=" + duplexMode
             + " host=" + printerHost + ":" + printerPort + " rp=" + printerResourcePath);
         Log.d(TAG, "printDirectIPP: pagesJson length=" + (pagesJson != null ? pagesJson.length() : "null"));
 
@@ -1118,11 +1123,16 @@ public class MainActivity extends AppCompatActivity {
         OutputStream out = sock.getOutputStream();
 
         // PJL header — ENTER LANGUAGE = PDF tells printer to interpret data as PDF
+        String pjlDuplex = duplexMode
+            ? "@PJL SET DUPLEX = ON\r\n@PJL SET BINDING = LONGEDGE\r\n"
+            : "";
         String pjlHeader = "\u001B%-12345X@PJL\r\n"
             + "@PJL SET PAPER = A4\r\n"
             + "@PJL SET FIT TO PAGE = ON\r\n"
+            + pjlDuplex
             + "@PJL JOB NAME = \"Print\"\r\n"
             + "@PJL ENTER LANGUAGE = PDF\r\n";
+        jsLog("raw9100-pdf: duplex=" + duplexMode);
 
         String pjlFooter = "\u001B%-12345X@PJL EOJ\r\n\u001B%-12345X";
 
@@ -1212,6 +1222,11 @@ public class MainActivity extends AppCompatActivity {
         ipp.write(0x02);
         writeIPPInteger(ipp, 0x21, "copies", copies);
         writeIPPString(ipp, 0x44, "print-scaling", "fit");
+        // Duplex: two-sided-long-edge = flip on long edge (normal duplex)
+        if (duplexMode) {
+            writeIPPString(ipp, 0x44, "sides", "two-sided-long-edge");
+            jsLog("trySendIPP: duplex=ON (two-sided-long-edge)");
+        }
 
         // End of attributes
         ipp.write(0x03);
@@ -1467,9 +1482,10 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
-        public void printDirect(String pagesJson, int layout, int copies) {
+        public void printDirect(String pagesJson, int layout, int copies, boolean duplex) {
+            duplexMode = duplex;
             Log.d(TAG, ">>> JS Bridge: printDirect() called, layout=" + layout
-                + " copies=" + copies + " pagesJson length="
+                + " copies=" + copies + " duplex=" + duplex + " pagesJson length="
                 + (pagesJson != null ? pagesJson.length() : "null"));
             printDirectIPP(pagesJson, layout, copies);
         }

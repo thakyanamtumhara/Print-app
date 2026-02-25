@@ -278,6 +278,21 @@ html, body {
   background: #e5e5ea;
 }
 
+/* ── Duplex (Both Side) Toggle ── */
+.duplex-btn.active {
+  background: #007aff;
+  border-color: #007aff;
+}
+
+.duplex-btn.active svg rect,
+.duplex-btn.active svg line {
+  stroke: #fff;
+}
+
+.duplex-btn.active svg text {
+  fill: #fff;
+}
+
 /* ── Settings Section ── */
 .settings-section {
   background: #fff;
