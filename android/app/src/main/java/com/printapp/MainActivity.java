@@ -805,15 +805,28 @@ public class MainActivity extends AppCompatActivity {
                 Log.d(TAG, "printDirectIPP: created " + jpegPages.size() + " JPEG pages");
                 jsLog("printDirectIPP: created " + jpegPages.size() + " JPEG sheets");
 
-                for (int p = 0; p < jpegPages.size(); p++) {
-                    byte[] jpegData = jpegPages.get(p);
-                    Log.d(TAG, "printDirectIPP: sending page " + (p + 1) + "/" + jpegPages.size()
-                        + " size=" + jpegData.length + " bytes");
-                    jsLog("printDirectIPP: sending sheet " + (p + 1) + "/" + jpegPages.size()
-                        + " size=" + jpegData.length + " bytes");
-                    sendIPP(jpegData, copies);
-                    Log.d(TAG, "printDirectIPP: page " + (p + 1) + " sent successfully");
-                    jsLog("printDirectIPP: sheet " + (p + 1) + " sent OK");
+                if (duplexMode && jpegPages.size() > 1) {
+                    // DUPLEX: combine ALL sheets into ONE multi-page PDF
+                    // Printer pairs pages: page1=front, page2=back, page3=front, etc.
+                    jsLog("printDirectIPP: DUPLEX mode — combining " + jpegPages.size()
+                        + " sheets into single multi-page PDF");
+                    byte[] multiPagePdf = jpegListToPdf(jpegPages);
+                    jsLog("printDirectIPP: multi-page PDF size=" + multiPagePdf.length
+                        + " bytes, sending as ONE job...");
+                    sendPDF(multiPagePdf, copies);
+                    jsLog("printDirectIPP: duplex job sent OK");
+                } else {
+                    // SIMPLEX or single page: send each sheet as separate job
+                    for (int p = 0; p < jpegPages.size(); p++) {
+                        byte[] jpegData = jpegPages.get(p);
+                        Log.d(TAG, "printDirectIPP: sending page " + (p + 1) + "/" + jpegPages.size()
+                            + " size=" + jpegData.length + " bytes");
+                        jsLog("printDirectIPP: sending sheet " + (p + 1) + "/" + jpegPages.size()
+                            + " size=" + jpegData.length + " bytes");
+                        sendIPP(jpegData, copies);
+                        Log.d(TAG, "printDirectIPP: page " + (p + 1) + " sent successfully");
+                        jsLog("printDirectIPP: sheet " + (p + 1) + " sent OK");
+                    }
                 }
 
                 Log.d(TAG, "=== printDirectIPP SUCCESS ===");
@@ -940,6 +953,44 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "createJpegPages: total " + pages.size() + " JPEG pages created");
         jsLog("createJpegPages: total " + pages.size() + " sheets created");
         return pages;
+    }
+
+    // Convert multiple JPEG sheets into a single multi-page PDF
+    // Required for duplex: all pages must be in ONE print job for front/back pairing
+    private byte[] jpegListToPdf(List<byte[]> jpegPages) throws Exception {
+        PdfDocument pdf = new PdfDocument();
+
+        for (int i = 0; i < jpegPages.size(); i++) {
+            byte[] jpegData = jpegPages.get(i);
+            Bitmap bmp = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.length);
+            if (bmp == null) throw new Exception("Failed to decode JPEG page " + (i + 1));
+
+            // Auto-detect landscape
+            int pageWidthPt, pageHeightPt;
+            if (bmp.getWidth() > bmp.getHeight()) {
+                pageWidthPt = 842;  // landscape
+                pageHeightPt = 595;
+            } else {
+                pageWidthPt = 595;  // portrait
+                pageHeightPt = 842;
+            }
+
+            PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
+                pageWidthPt, pageHeightPt, i + 1).create();
+            PdfDocument.Page page = pdf.startPage(pageInfo);
+            Canvas canvas = page.getCanvas();
+            canvas.drawBitmap(bmp, null,
+                new android.graphics.Rect(0, 0, pageWidthPt, pageHeightPt), null);
+            pdf.finishPage(page);
+            bmp.recycle();
+        }
+
+        ByteArrayOutputStream pdfOut = new ByteArrayOutputStream();
+        pdf.writeTo(pdfOut);
+        pdf.close();
+
+        jsLog("jpegListToPdf: " + jpegPages.size() + " pages → " + pdfOut.size() + " PDF bytes");
+        return pdfOut.toByteArray();
     }
 
     // Convert JPEG image bytes to a single-page PDF document
@@ -1107,6 +1158,72 @@ public class MainActivity extends AppCompatActivity {
         }
 
         throw lastError != null ? lastError : new Exception("All print attempts failed");
+    }
+
+    // Send pre-built PDF data (already multi-page) — used for duplex
+    private void sendPDF(byte[] pdfData, int copies) throws Exception {
+        String host = printerHost;
+        jsLog("=== sendPDF START === size=" + pdfData.length + " host=" + host);
+
+        jsLog("sendPDF: probing ports 631 + 9100 on " + host + "...");
+        final boolean[] portResults = new boolean[2];
+        Thread t631  = new Thread(() -> portResults[0] = isPortOpen(host, 631, 2000));
+        Thread t9100 = new Thread(() -> portResults[1] = isPortOpen(host, 9100, 2000));
+        t631.start(); t9100.start();
+        try { t631.join(); } catch (InterruptedException ignored) {}
+        try { t9100.join(); } catch (InterruptedException ignored) {}
+        boolean port631Open  = portResults[0];
+        boolean port9100Open = portResults[1];
+        jsLog("sendPDF: port 631=" + (port631Open ? "OPEN" : "CLOSED")
+            + " port 9100=" + (port9100Open ? "OPEN" : "CLOSED"));
+
+        Exception lastError = null;
+
+        // Strategy 1: PDF via port 9100 with PJL
+        if (port9100Open) {
+            try {
+                trySendRaw9100_pdf(host, pdfData);
+                jsLog("=== sendPDF raw9100 (PDF+PJL) SUCCESS ===");
+                return;
+            } catch (Exception e) {
+                jsLog("sendPDF raw9100 PDF+PJL FAILED: " + e.getMessage());
+                lastError = e;
+            }
+
+            Thread.sleep(1000);
+
+            // Strategy 2: Raw PDF without PJL
+            try {
+                trySendRaw9100_pdfNoPjl(host, pdfData);
+                jsLog("=== sendPDF raw9100 (PDF raw) SUCCESS ===");
+                return;
+            } catch (Exception e) {
+                jsLog("sendPDF raw9100 PDF-raw FAILED: " + e.getMessage());
+                lastError = e;
+            }
+        }
+
+        // Strategy 3: IPP on port 631 with PDF
+        if (port631Open) {
+            String ippPath = "/ipp/print";
+            if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
+                ippPath = printerResourcePath.startsWith("/")
+                    ? printerResourcePath : "/" + printerResourcePath;
+            }
+            jsLog("sendPDF: trying IPP port 631 path=" + ippPath + " format=application/pdf");
+            try {
+                trySendIPP(host, 631, ippPath, pdfData, copies, "application/pdf");
+                jsLog("=== sendPDF IPP SUCCESS === port=631 path=" + ippPath);
+                printerPort = 631;
+                printerResourcePath = ippPath;
+                return;
+            } catch (Exception e) {
+                jsLog("sendPDF: IPP 631 PDF FAILED: " + e.getMessage());
+                lastError = e;
+            }
+        }
+
+        throw lastError != null ? lastError : new Exception("All PDF print attempts failed");
     }
 
     // ── Port 9100 Strategy A: Send PDF via PJL ──
