@@ -805,29 +805,16 @@ public class MainActivity extends AppCompatActivity {
                 Log.d(TAG, "printDirectIPP: created " + jpegPages.size() + " JPEG pages");
                 jsLog("printDirectIPP: created " + jpegPages.size() + " JPEG sheets");
 
-                if (duplexMode && jpegPages.size() > 1) {
-                    // DUPLEX: combine ALL sheets into ONE multi-page PDF
-                    // Printer pairs pages: page1=front, page2=back, page3=front, etc.
-                    jsLog("printDirectIPP: DUPLEX mode — combining " + jpegPages.size()
-                        + " sheets into single multi-page PDF");
-                    byte[] multiPagePdf = jpegListToPdf(jpegPages);
-                    jsLog("printDirectIPP: multi-page PDF size=" + multiPagePdf.length
-                        + " bytes, sending as ONE job...");
-                    sendPDF(multiPagePdf, copies);
-                    jsLog("printDirectIPP: duplex job sent OK");
-                } else {
-                    // SIMPLEX or single page: send each sheet as separate job
-                    for (int p = 0; p < jpegPages.size(); p++) {
-                        byte[] jpegData = jpegPages.get(p);
-                        Log.d(TAG, "printDirectIPP: sending page " + (p + 1) + "/" + jpegPages.size()
-                            + " size=" + jpegData.length + " bytes");
-                        jsLog("printDirectIPP: sending sheet " + (p + 1) + "/" + jpegPages.size()
-                            + " size=" + jpegData.length + " bytes");
-                        sendIPP(jpegData, copies);
-                        Log.d(TAG, "printDirectIPP: page " + (p + 1) + " sent successfully");
-                        jsLog("printDirectIPP: sheet " + (p + 1) + " sent OK");
-                    }
-                }
+                // ALWAYS combine all sheets into ONE multi-page PDF and send as
+                // a single print job.  Sending sheets as separate jobs overwhelms
+                // the Brother printer's TCP stack → blank / extra pages.
+                jsLog("printDirectIPP: combining " + jpegPages.size()
+                    + " sheets into single multi-page PDF (duplex=" + duplexMode + ")");
+                byte[] multiPagePdf = jpegListToPdf(jpegPages);
+                jsLog("printDirectIPP: multi-page PDF size=" + multiPagePdf.length
+                    + " bytes, sending as ONE job...");
+                sendPDF(multiPagePdf, copies);
+                jsLog("printDirectIPP: job sent OK");
 
                 Log.d(TAG, "=== printDirectIPP SUCCESS ===");
                 jsLog("=== printDirectIPP SUCCESS ===");
