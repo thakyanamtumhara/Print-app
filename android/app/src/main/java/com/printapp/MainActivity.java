@@ -1147,7 +1147,7 @@ public class MainActivity extends AppCompatActivity {
         throw lastError != null ? lastError : new Exception("All print attempts failed");
     }
 
-    // Send pre-built PDF data (already multi-page) — used for duplex
+    // Send pre-built PDF data (already multi-page)
     private void sendPDF(byte[] pdfData, int copies) throws Exception {
         String host = printerHost;
         jsLog("=== sendPDF START === size=" + pdfData.length + " host=" + host);
@@ -1166,31 +1166,9 @@ public class MainActivity extends AppCompatActivity {
 
         Exception lastError = null;
 
-        // Strategy 1: PDF via port 9100 with PJL
-        if (port9100Open) {
-            try {
-                trySendRaw9100_pdf(host, pdfData);
-                jsLog("=== sendPDF raw9100 (PDF+PJL) SUCCESS ===");
-                return;
-            } catch (Exception e) {
-                jsLog("sendPDF raw9100 PDF+PJL FAILED: " + e.getMessage());
-                lastError = e;
-            }
-
-            Thread.sleep(1000);
-
-            // Strategy 2: Raw PDF without PJL
-            try {
-                trySendRaw9100_pdfNoPjl(host, pdfData);
-                jsLog("=== sendPDF raw9100 (PDF raw) SUCCESS ===");
-                return;
-            } catch (Exception e) {
-                jsLog("sendPDF raw9100 PDF-raw FAILED: " + e.getMessage());
-                lastError = e;
-            }
-        }
-
-        // Strategy 3: IPP on port 631 with PDF
+        // ─── Strategy 1: IPP on port 631 (PREFERRED — most reliable) ───
+        // IPP explicitly declares document-format, returns job status,
+        // and never causes the "continuous blank pages" issue.
         if (port631Open) {
             String ippPath = "/ipp/print";
             if (printerResourcePath != null && !printerResourcePath.isEmpty()) {
@@ -1210,11 +1188,39 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        // ─── Strategy 2: PDF via port 9100 with PJL (fallback) ───
+        if (port9100Open) {
+            try {
+                trySendRaw9100_pdf(host, pdfData);
+                jsLog("=== sendPDF raw9100 (PDF+PJL) SUCCESS ===");
+                return;
+            } catch (Exception e) {
+                jsLog("sendPDF raw9100 PDF+PJL FAILED: " + e.getMessage());
+                lastError = e;
+            }
+
+            Thread.sleep(1000);
+
+            // Strategy 3: Raw PDF without PJL
+            try {
+                trySendRaw9100_pdfNoPjl(host, pdfData);
+                jsLog("=== sendPDF raw9100 (PDF raw) SUCCESS ===");
+                return;
+            } catch (Exception e) {
+                jsLog("sendPDF raw9100 PDF-raw FAILED: " + e.getMessage());
+                lastError = e;
+            }
+        }
+
         throw lastError != null ? lastError : new Exception("All PDF print attempts failed");
     }
 
     // ── Port 9100 Strategy A: Send PDF via PJL ──
-    // Brother printers natively understand PDF on port 9100
+    // Brother printers natively understand PDF on port 9100.
+    // IMPORTANT: PJL header must be flushed FIRST with a delay so the
+    // printer enters PDF mode BEFORE receiving binary PDF data.
+    // Without this delay the printer may stay in PCL mode and interpret
+    // the raw PDF bytes as text → continuous blank pages.
     private void trySendRaw9100_pdf(String host, byte[] pdfData) throws Exception {
         jsLog("raw9100-pdf: connecting to " + host + ":9100...");
         Socket sock = new Socket();
@@ -1226,29 +1232,45 @@ public class MainActivity extends AppCompatActivity {
 
         OutputStream out = sock.getOutputStream();
 
-        // PJL header — ENTER LANGUAGE = PDF tells printer to interpret data as PDF
+        // PJL header — only standard Brother-supported commands
         String pjlDuplex = duplexMode
             ? "@PJL SET DUPLEX = ON\r\n@PJL SET BINDING = LONGEDGE\r\n"
             : "";
         String pjlHeader = "\u001B%-12345X@PJL\r\n"
             + "@PJL SET PAPER = A4\r\n"
-            + "@PJL SET FIT TO PAGE = ON\r\n"
             + pjlDuplex
-            + "@PJL JOB NAME = \"Print\"\r\n"
             + "@PJL ENTER LANGUAGE = PDF\r\n";
         jsLog("raw9100-pdf: duplex=" + duplexMode);
 
         String pjlFooter = "\u001B%-12345X@PJL EOJ\r\n\u001B%-12345X";
 
+        // Step 1: send PJL header and flush — printer needs time to
+        // parse ENTER LANGUAGE = PDF before receiving binary data
         out.write(pjlHeader.getBytes("ASCII"));
-        out.write(pdfData);
+        out.flush();
+        Thread.sleep(200);
+
+        // Step 2: send PDF data in 64 KB chunks to avoid overwhelming
+        // the printer's receive buffer
+        int offset = 0;
+        int chunkSize = 65536;
+        while (offset < pdfData.length) {
+            int len = Math.min(chunkSize, pdfData.length - offset);
+            out.write(pdfData, offset, len);
+            offset += len;
+        }
+        out.flush();
+        jsLog("raw9100-pdf: " + pdfData.length + " PDF bytes sent in chunks");
+
+        // Step 3: send PJL footer to properly terminate the job
+        Thread.sleep(100);
         out.write(pjlFooter.getBytes("ASCII"));
         out.flush();
-        jsLog("raw9100-pdf: " + pdfData.length + " PDF bytes sent, waiting...");
+        jsLog("raw9100-pdf: PJL footer sent, waiting for printer...");
 
         // Read any response from printer (some send status back)
         try {
-            sock.setSoTimeout(3000);
+            sock.setSoTimeout(5000);
             InputStream in = sock.getInputStream();
             byte[] resp = new byte[1024];
             int n = in.read(resp);
@@ -1259,7 +1281,7 @@ public class MainActivity extends AppCompatActivity {
             // Timeout reading response is normal
         }
 
-        Thread.sleep(500);
+        Thread.sleep(1000);
         out.close();
         sock.close();
         jsLog("raw9100-pdf: done");
