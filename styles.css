@@ -674,3 +674,196 @@ html, body {
     margin: 8px;
   }
 }
+
+/* ── Dashboard Settings Modal ── */
+.dash-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.dash-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  width: 100%;
+  max-width: 360px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+}
+
+.dash-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #111;
+  margin-bottom: 14px;
+}
+
+.dash-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8e8e93;
+  margin: 10px 0 4px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.dash-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 15px;
+  border: 1.5px solid #d1d1d6;
+  border-radius: 10px;
+  background: #f2f2f7;
+  color: #111;
+  outline: none;
+}
+
+.dash-input:focus {
+  border-color: #007aff;
+  background: #fff;
+}
+
+.dash-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 4px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #222;
+}
+
+.dash-switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.dash-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.dash-knob {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #d1d1d6;
+  border-radius: 14px;
+  transition: background 0.2s;
+}
+
+.dash-knob::before {
+  content: '';
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.dash-switch input:checked + .dash-knob {
+  background: #34c759;
+}
+
+.dash-switch input:checked + .dash-knob::before {
+  transform: translateX(20px);
+}
+
+.dash-ping {
+  min-height: 18px;
+  font-size: 13px;
+  margin: 8px 0 2px;
+  color: #8e8e93;
+}
+
+.dash-btn-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.dash-btn {
+  flex: 1;
+  padding: 11px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+}
+
+.dash-btn.primary {
+  background: #007aff;
+  color: #fff;
+}
+
+.dash-btn.primary:active {
+  background: #0056b8;
+}
+
+.dash-btn.secondary {
+  background: #f2f2f7;
+  color: #007aff;
+  border: 1.5px solid #d1d1d6;
+}
+
+.dash-btn.secondary:active {
+  background: #e5e5ea;
+}
+
+.dash-status {
+  font-size: 12px;
+  color: #8e8e93;
+  margin-top: 10px;
+  line-height: 1.4;
+  min-height: 16px;
+  word-break: break-word;
+}
+
+/* ── In-app Toast ── */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 90px;
+  transform: translateX(-50%) translateY(20px);
+  max-width: 86%;
+  background: rgba(30, 30, 32, 0.94);
+  color: #fff;
+  font-size: 14px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+  z-index: 2000;
+  text-align: center;
+}
+
+.app-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.app-toast.app-toast-error {
+  background: rgba(255, 59, 48, 0.95);
+}

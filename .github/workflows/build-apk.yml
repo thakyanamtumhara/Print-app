@@ -36,7 +36,7 @@ jobs:
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug -PbuildNumber=${{ github.run_number }}
 
       - name: Rename APK with date
         run: |

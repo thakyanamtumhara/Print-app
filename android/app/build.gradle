@@ -2,6 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
+def bn = (project.hasProperty('buildNumber') ? buildNumber.toString() : '1').toInteger()
+
 android {
     namespace 'com.printapp'
     compileSdk 34
@@ -10,8 +12,12 @@ android {
         applicationId "com.printapp"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode bn
+        versionName "2." + bn
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {

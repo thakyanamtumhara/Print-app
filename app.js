@@ -110,6 +110,14 @@ document.addEventListener('DOMContentLoaded', () => {
   var shareBtn = document.getElementById('shareBtn');
   var duplexBtn = document.getElementById('duplexBtn');
   var fileInput = document.getElementById('fileInput');
+  var dashBtn = document.getElementById('dashBtn');
+  var dashModal = document.getElementById('dashModal');
+  var dashWodUrl = document.getElementById('dashWodUrl');
+  var dashToken = document.getElementById('dashToken');
+  var dashPrinterIp = document.getElementById('dashPrinterIp');
+  var dashEnabled = document.getElementById('dashEnabled');
+  var dashPing = document.getElementById('dashPing');
+  var dashStatus = document.getElementById('dashStatus');
 
   var pageImages = [];     // data-URL per PDF/image page (for printing)
   var pageOrientations = []; // 'landscape' | 'portrait' per page
@@ -117,6 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
   var selectedPages = [];  // boolean array — true = page selected for printing
   var pdfRenderComplete = true; // false while PDF pages are still rendering
   var duplexEnabled = false; // both-side printing
+  var lastPrintProgressAt = 0;
   var eraserEnabled = false;
   var eraserEverUsed = false; // tracks if eraser was used on current file
 
@@ -149,6 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function checkPrinter() {
+    if (Date.now() - lastPrintProgressAt < 8000) return;
     if (window.AndroidBridge) {
       try {
         updatePrinterStatus(window.AndroidBridge.isPrinterConnected() ? 'connected' : 'disconnected');
@@ -188,6 +198,120 @@ document.addEventListener('DOMContentLoaded', () => {
     duplexEnabled = !duplexEnabled;
     duplexBtn.classList.toggle('active', duplexEnabled);
     console.log('[PRINT-DEBUG] Duplex toggled: ' + duplexEnabled);
+  });
+
+  var toastEl = document.createElement('div');
+  toastEl.className = 'app-toast';
+  document.body.appendChild(toastEl);
+  var toastTimer = null;
+
+  function showToast(msg, isError) {
+    toastEl.textContent = msg;
+    toastEl.classList.toggle('app-toast-error', !!isError);
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() { toastEl.classList.remove('show'); }, 4000);
+  }
+
+  window.onPrintProgress = function(msg) {
+    lastPrintProgressAt = Date.now();
+    printerText.textContent = msg;
+  };
+
+  window.onPrintResult = function(ok, msg) {
+    lastPrintProgressAt = 0;
+    showToast(msg, !ok);
+    checkPrinter();
+  };
+
+  window.onQueuePing = function(ok, msg) {
+    if (dashModal.style.display !== 'none') {
+      dashPing.textContent = (ok ? '✓ ' : '✗ ') + msg;
+      dashPing.style.color = ok ? '#34c759' : '#ff3b30';
+    } else {
+      showToast(msg, !ok);
+    }
+  };
+
+  var dashTimer = null;
+
+  function readQueueConfig() {
+    try { return JSON.parse(window.AndroidBridge.getQueueConfig()); }
+    catch(e) { console.log('[DASH] getQueueConfig failed: ' + e.message); return null; }
+  }
+
+  function refreshDashStatus() {
+    var cfg = readQueueConfig();
+    if (!cfg) { dashStatus.textContent = 'Status not available'; return; }
+    var line = cfg.running ? 'Auto-print service running' : 'Auto-print service stopped';
+    if (cfg.lastResult) line += ' · ' + cfg.lastResult;
+    dashStatus.textContent = line;
+  }
+
+  function openDashModal() {
+    var cfg = readQueueConfig() || {};
+    dashWodUrl.value = cfg.wodUrl || 'https://track.sale91.com';
+    dashToken.value = cfg.token || '';
+    dashPrinterIp.value = cfg.printerIp || '';
+    dashEnabled.checked = !!cfg.enabled;
+    dashPing.textContent = '';
+    dashModal.style.display = 'flex';
+    refreshDashStatus();
+    clearInterval(dashTimer);
+    dashTimer = setInterval(refreshDashStatus, 3000);
+  }
+
+  function closeDashModal() {
+    dashModal.style.display = 'none';
+    clearInterval(dashTimer);
+  }
+
+  function saveDashConfig(quiet) {
+    try {
+      window.AndroidBridge.setQueueConfig(JSON.stringify({
+        wodUrl: dashWodUrl.value.trim(),
+        token: dashToken.value.trim(),
+        printerIp: dashPrinterIp.value.trim(),
+        enabled: dashEnabled.checked
+      }));
+      if (!quiet) showToast('Settings saved');
+      refreshDashStatus();
+      return true;
+    } catch(e) {
+      showToast('Save failed: ' + e.message, true);
+      return false;
+    }
+  }
+
+  if (window.AndroidBridge && typeof window.AndroidBridge.getQueueConfig === 'function') {
+    dashBtn.style.display = 'flex';
+  }
+
+  dashBtn.addEventListener('click', openDashModal);
+  document.getElementById('dashCloseBtn').addEventListener('click', closeDashModal);
+  dashModal.addEventListener('click', function(e) {
+    if (e.target === dashModal) closeDashModal();
+  });
+  document.getElementById('dashSaveBtn').addEventListener('click', function() {
+    saveDashConfig(false);
+  });
+  document.getElementById('dashTestBtn').addEventListener('click', function() {
+    dashPing.style.color = '#8e8e93';
+    dashPing.textContent = 'Testing…';
+    if (!saveDashConfig(true)) { dashPing.textContent = ''; return; }
+    try { window.AndroidBridge.queuePing(); }
+    catch(e) {
+      dashPing.style.color = '#ff3b30';
+      dashPing.textContent = '✗ ' + e.message;
+    }
+  });
+  document.getElementById('dashUpdateBtn').addEventListener('click', function() {
+    try {
+      window.AndroidBridge.checkForUpdate();
+      showToast('Checking for update…');
+    } catch(e) {
+      showToast('Update check failed: ' + e.message, true);
+    }
   });
 
   // ── Layout change → update in-app preview ──
@@ -660,6 +784,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (isAndroid) {
         if ((contentType === 'pdf' || contentType === 'image') && validCount > 0) {
+          // Whole clean PDF at layout 1 → page-streamed native path (memory-safe
+          // for long PDFs; the engine renders one page at a time)
+          var allPagesSelected = selectedImgs.length === pageImages.length;
+          var hasOrigPdf = false;
+          try { hasOrigPdf = window.AndroidBridge.hasOriginalPdf(); } catch (e) {}
+          if (contentType === 'pdf' && layout === 1 && allPagesSelected && !eraserEverUsed && hasOrigPdf) {
+            try {
+              console.log('[PRINT-DEBUG] Calling AndroidBridge.printDirectPdf() duplex=' + duplexEnabled);
+              window.AndroidBridge.printDirectPdf(1, duplexEnabled);
+              return;
+            } catch (e) {
+              console.log('[PRINT-DEBUG] printDirectPdf failed (' + e.message + '), falling back to printDirect');
+            }
+          }
           // Android native path: send data URLs directly to native bridge
           // Do NOT call buildPrintArea — it creates unnecessary hidden DOM copies
           // of large base64 images, wasting memory and causing intermittent blank pages

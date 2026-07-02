@@ -98,6 +98,9 @@
             <button id="duplexBtn" class="open-file-icon duplex-btn" title="Both Side Print">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="#007aff" stroke-width="2"/><line x1="12" y1="3" x2="12" y2="21" stroke="#007aff" stroke-width="1.5" stroke-dasharray="2 2"/><text x="7" y="14" font-size="8" font-weight="700" fill="#007aff" text-anchor="middle">A</text><text x="17" y="14" font-size="8" font-weight="700" fill="#007aff" text-anchor="middle">B</text></svg>
             </button>
+            <button id="dashBtn" class="open-file-icon" title="Dashboard" style="display:none">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="12" rx="2" stroke="#007aff" stroke-width="2"/><path d="M8 20H16" stroke="#007aff" stroke-width="2" stroke-linecap="round"/><path d="M12 16V20" stroke="#007aff" stroke-width="2" stroke-linecap="round"/><path d="M7 10L10 13L13 8L15 11" stroke="#007aff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
           </div>
           <div class="setting-control">
             <select id="layoutSelect">
@@ -123,6 +126,35 @@
           </svg>
           Print
         </button>
+      </div>
+    </div>
+
+    <div id="dashModal" class="dash-overlay" style="display:none">
+      <div class="dash-card">
+        <div class="dash-title">&#128424; Dashboard</div>
+        <label class="dash-label" for="dashWodUrl">WOD URL</label>
+        <input id="dashWodUrl" class="dash-input" type="url" placeholder="https://track.sale91.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <label class="dash-label" for="dashToken">Token</label>
+        <input id="dashToken" class="dash-input" type="password" placeholder="Access token">
+        <label class="dash-label" for="dashPrinterIp">Printer IP</label>
+        <input id="dashPrinterIp" class="dash-input" type="text" placeholder="192.168.1.112" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div class="dash-toggle-row">
+          <span>Auto-print dashboard jobs</span>
+          <label class="dash-switch">
+            <input id="dashEnabled" type="checkbox">
+            <span class="dash-knob"></span>
+          </label>
+        </div>
+        <div id="dashPing" class="dash-ping"></div>
+        <div class="dash-btn-row">
+          <button id="dashTestBtn" class="dash-btn secondary">Test</button>
+          <button id="dashUpdateBtn" class="dash-btn secondary">Check update</button>
+        </div>
+        <div id="dashStatus" class="dash-status"></div>
+        <div class="dash-btn-row">
+          <button id="dashCloseBtn" class="dash-btn secondary">Close</button>
+          <button id="dashSaveBtn" class="dash-btn primary">Save</button>
+        </div>
       </div>
     </div>
   </div>
