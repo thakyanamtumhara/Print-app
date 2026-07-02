@@ -38,45 +38,51 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug -PbuildNumber=${{ github.run_number }}
 
-      - name: Build signed Play AAB
+      # Release APK is signed with the persistent upload key so every build
+      # installs OVER the previous one (debug builds get a fresh throwaway key
+      # per CI runner — those can never update each other). The queue token is
+      # baked in from the repo secret so installs need zero setup.
+      - name: Build signed release APK + Play AAB
         if: ${{ github.ref == 'refs/heads/main' }}
         working-directory: android
         env:
           UPLOAD_KEYSTORE_B64: ${{ secrets.UPLOAD_KEYSTORE_B64 }}
           UPLOAD_KEYSTORE_PASS: ${{ secrets.UPLOAD_KEYSTORE_PASS }}
+          PRINT_QUEUE_TOKEN: ${{ secrets.PRINT_QUEUE_TOKEN }}
         run: |
           if [ -n "$UPLOAD_KEYSTORE_B64" ]; then
             echo "$UPLOAD_KEYSTORE_B64" | base64 -d > /tmp/upload.jks
-            UPLOAD_KEYSTORE_FILE=/tmp/upload.jks ./gradlew bundleRelease -PbuildNumber=${{ github.run_number }}
+            UPLOAD_KEYSTORE_FILE=/tmp/upload.jks ./gradlew assembleRelease bundleRelease \
+              -PbuildNumber=${{ github.run_number }} -PprintToken="$PRINT_QUEUE_TOKEN"
+            DATE=$(date +'%Y-%m-%d')
+            cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Print-$DATE.apk
             cp app/build/outputs/bundle/release/app-release.aab app/build/outputs/bundle/release/Print-play-${{ github.run_number }}.aab
           else
-            echo "No keystore secret — skipping AAB"
+            echo "No keystore secret — skipping signed builds"
           fi
 
-      - name: Rename APK with date
-        run: |
-          DATE=$(date +'%Y-%m-%d')
-          cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/Print-$DATE.apk
-
-      - name: Upload APK as artifact
+      - name: Upload APKs as artifact
         uses: actions/upload-artifact@v4
         with:
           name: Print-APK
-          path: android/app/build/outputs/apk/debug/Print-*.apk
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/Print-*.apk
           retention-days: 90
 
       - name: Create Release
+        if: ${{ github.ref == 'refs/heads/main' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Print Build #${{ github.run_number }}
           files: |
-            android/app/build/outputs/apk/debug/Print-*.apk
+            android/app/build/outputs/apk/release/Print-*.apk
             android/app/build/outputs/bundle/release/Print-play-*.aab
           body: |
             Automatic build from commit ${{ github.sha }}
 
             Download the APK file below and install on your Android phone.
-            The .aab file (main branch only) is the Play Store upload bundle.
+            The .aab file is the Play Store upload bundle.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,6 +3,9 @@ plugins {
 }
 
 def bn = (project.hasProperty('buildNumber') ? buildNumber.toString() : '1').toInteger()
+// Baked-in print-queue defaults: CI injects the real token from a repo secret
+// so the app works with zero setup; token never lives in source.
+def printToken = project.hasProperty('printToken') ? printToken.toString() : ''
 
 android {
     namespace 'com.printapp'
@@ -15,6 +18,9 @@ android {
         targetSdk 35
         versionCode bn
         versionName "2." + bn
+        buildConfigField "String", "DEF_WOD_URL", '"https://track.sale91.com"'
+        buildConfigField "String", "DEF_TOKEN", "\"${printToken}\""
+        buildConfigField "String", "DEF_PRINTER_IP", '"192.168.1.112"'
     }
 
     buildFeatures {

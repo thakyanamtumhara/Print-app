@@ -228,6 +228,10 @@ public class MainActivity extends AppCompatActivity {
         // Silent update check on launch
         UpdateChecker.checkAsync(this, true);
 
+        // Zero-setup: seed the baked-in dashboard config on first run, then
+        // auto-enable the relay whenever the godam printer is actually reachable
+        autoConfigureQueue();
+
         // Resume the dashboard print-queue relay if it was configured
         if (PrintQueueService.isConfigured(this)) PrintQueueService.start(this);
 
@@ -237,6 +241,46 @@ public class MainActivity extends AppCompatActivity {
                     != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 1001);
         }
+    }
+
+    /**
+     * Bakes the dashboard defaults (URL/token/printer IP, injected at build
+     * time) into prefs on first run, and on every launch probes the printer:
+     * reachable + not yet enabled → switch the relay on by itself. A phone
+     * that can't see the printer stays a plain print app.
+     */
+    private void autoConfigureQueue() {
+        if (BuildConfig.DEF_TOKEN.isEmpty()) return;
+        final SharedPreferences p = getSharedPreferences(PrintQueueService.PREFS, MODE_PRIVATE);
+        if (p.getString("token", "").isEmpty()) {
+            SharedPreferences.Editor ed = p.edit();
+            ed.putString("wodUrl", BuildConfig.DEF_WOD_URL);
+            ed.putString("token", BuildConfig.DEF_TOKEN);
+            if (p.getString("printerIp", "").isEmpty()) {
+                ed.putString("printerIp", BuildConfig.DEF_PRINTER_IP);
+            }
+            ed.apply();
+        }
+        if (p.getBoolean("enabled", false)) return;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    String ip = p.getString("printerIp", BuildConfig.DEF_PRINTER_IP);
+                    IppClient.Response r = new IppClient(ip).getPrinterAttributes();
+                    if (r.ok()) {
+                        p.edit().putBoolean("enabled", true).apply();
+                        PrintQueueService.start(MainActivity.this);
+                        runOnUiThread(new Runnable() {
+                            @Override public void run() {
+                                Toast.makeText(MainActivity.this,
+                                        "Godam printer connected — dashboard printing ON",
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }, "queue-autoconf").start();
     }
 
     // ── File picker result ──
