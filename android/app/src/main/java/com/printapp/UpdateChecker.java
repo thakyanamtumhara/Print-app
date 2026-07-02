@@ -27,6 +27,10 @@ public final class UpdateChecker {
 
     private static final String LATEST =
             "https://api.github.com/repos/thakyanamtumhara/Print-app/releases/latest";
+    // GitHub asset downloads stall on some Indian mobile networks — every
+    // build is mirrored on our own CDN under a per-build filename.
+    private static final String MIRROR_META = "https://www.bulkplaintshirt.com/app/latest.json";
+    private static final String MIRROR_APK = "https://www.bulkplaintshirt.com/app/Print-build%d.apk";
 
     private UpdateChecker() {}
 
@@ -36,40 +40,57 @@ public final class UpdateChecker {
         }, "update-check").start();
     }
 
-    private static void check(final Activity act, boolean silentIfCurrent) {
+    private static byte[] httpGet(String url, int readTimeout) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(10000);
+        c.setReadTimeout(readTimeout);
+        c.setInstanceFollowRedirects(true);
+        c.setRequestProperty("User-Agent", "printapp-updater");
         try {
-            HttpURLConnection c = (HttpURLConnection) new URL(LATEST).openConnection();
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(15000);
-            c.setRequestProperty("User-Agent", "printapp-updater");
-            c.setRequestProperty("Accept", "application/vnd.github+json");
-            if (c.getResponseCode() != 200) return;
+            if (c.getResponseCode() != 200) throw new Exception("HTTP " + c.getResponseCode());
             InputStream in = c.getInputStream();
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buf = new byte[8192];
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
             in.close();
-            JSONObject rel = new JSONObject(new String(out.toByteArray(), StandardCharsets.UTF_8));
-            String tag = rel.optString("tag_name", "");
-            int latest = parseBuildNumber(tag);
+            return out.toByteArray();
+        } finally {
+            try { c.disconnect(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void check(final Activity act, boolean silentIfCurrent) {
+        try {
+            int latest = -1;
+            String apkUrl = null;
+            try {
+                JSONObject rel = new JSONObject(new String(httpGet(LATEST, 15000), StandardCharsets.UTF_8));
+                latest = parseBuildNumber(rel.optString("tag_name", ""));
+                JSONArray assets = rel.optJSONArray("assets");
+                if (assets != null) {
+                    for (int i = 0; i < assets.length(); i++) {
+                        JSONObject a = assets.getJSONObject(i);
+                        if (a.optString("name", "").endsWith(".apk")) {
+                            apkUrl = a.optString("browser_download_url");
+                            break;
+                        }
+                    }
+                }
+            } catch (Throwable gh) {
+                JSONObject meta = new JSONObject(new String(httpGet(MIRROR_META, 15000), StandardCharsets.UTF_8));
+                latest = meta.optInt("build", -1);
+                apkUrl = meta.optString("url", "");
+            }
             int mine = BuildConfig.VERSION_CODE;
             if (latest <= 0) return;
             if (latest <= mine) {
                 if (!silentIfCurrent) toast(act, "App is up to date (build " + mine + ")");
                 return;
             }
-            String apkUrl = null;
-            JSONArray assets = rel.optJSONArray("assets");
-            if (assets != null) {
-                for (int i = 0; i < assets.length(); i++) {
-                    JSONObject a = assets.getJSONObject(i);
-                    String name = a.optString("name", "");
-                    if (name.endsWith(".apk")) { apkUrl = a.optString("browser_download_url"); break; }
-                }
-            }
-            if (apkUrl == null) return;
+            if (apkUrl == null || apkUrl.isEmpty()) apkUrl = String.format(MIRROR_APK, latest);
             final String fUrl = apkUrl;
+            final String fMirror = String.format(MIRROR_APK, latest);
             final int fLatest = latest;
             act.runOnUiThread(new Runnable() {
                 @Override public void run() {
@@ -77,7 +98,7 @@ public final class UpdateChecker {
                             .setTitle("Update available")
                             .setMessage("A new version (build " + fLatest + ") is available. "
                                     + "You have build " + BuildConfig.VERSION_CODE + ". Update now?")
-                            .setPositiveButton("Update", (d, w) -> downloadAndInstall(act, fUrl))
+                            .setPositiveButton("Update", (d, w) -> downloadAndInstall(act, fUrl, fMirror))
                             .setNegativeButton("Later", null)
                             .show();
                 }
@@ -85,26 +106,23 @@ public final class UpdateChecker {
         } catch (Throwable ignored) {}
     }
 
-    private static void downloadAndInstall(final Activity act, final String url) {
+    private static void downloadAndInstall(final Activity act, final String url, final String mirrorUrl) {
         toast(act, "Downloading update…");
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                    c.setConnectTimeout(15000);
-                    c.setReadTimeout(120000);
-                    c.setInstanceFollowRedirects(true);
-                    c.setRequestProperty("User-Agent", "printapp-updater");
-                    InputStream in = c.getInputStream();
+                    byte[] apkBytes;
+                    try {
+                        apkBytes = httpGet(url, 120000);
+                    } catch (Throwable gh) {
+                        apkBytes = httpGet(mirrorUrl, 120000);
+                    }
                     File dir = new File(act.getCacheDir(), "updates");
                     dir.mkdirs();
                     File apk = new File(dir, "update.apk");
                     FileOutputStream fo = new FileOutputStream(apk);
-                    byte[] buf = new byte[64 * 1024];
-                    int n;
-                    while ((n = in.read(buf)) > 0) fo.write(buf, 0, n);
+                    fo.write(apkBytes);
                     fo.close();
-                    in.close();
                     Uri uri = FileProvider.getUriForFile(act,
                             act.getPackageName() + ".fileprovider", apk);
                     Intent i = new Intent(Intent.ACTION_VIEW);
