@@ -47,6 +47,7 @@ public class PrintQueueService extends Service {
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
     private volatile String lastStatus = "starting";
+    private long lastHealthReport = 0;
 
     public static void start(Context ctx) {
         Intent i = new Intent(ctx, PrintQueueService.class);
@@ -107,6 +108,10 @@ public class PrintQueueService extends Service {
                     setStatus("Print queue: not configured");
                     sleep = ERROR_BACKOFF_MS;
                 } else {
+                    if (System.currentTimeMillis() - lastHealthReport > 60000) {
+                        lastHealthReport = System.currentTimeMillis();
+                        reportPrinterHealth(base, token, printerIp);
+                    }
                     HttpResult r = http("GET", base + "/api/print/next", token, null);
                     if (r.code == 200 && r.body.length > 0) {
                         JSONObject job = new JSONObject(new String(r.body, StandardCharsets.UTF_8));
@@ -249,6 +254,29 @@ public class PrintQueueService extends Service {
         }
         sb.append(id);
         p.edit().putString("printedIds", sb.toString()).apply();
+    }
+
+    /** Asks the printer for its own status (paper/jam/toner/paused) and
+     *  forwards it to the dashboard so problems are visible before printing. */
+    private void reportPrinterHealth(String base, String token, String printerIp) {
+        int state = -1;
+        java.util.List<String> reasons;
+        try {
+            IppClient.Response r = new IppClient(printerIp).getPrinterAttributes();
+            state = r.getInt("printer-state", -1);
+            reasons = r.attrs.get("printer-state-reasons");
+            if (reasons == null) reasons = new java.util.ArrayList<String>();
+        } catch (Throwable t) {
+            reasons = new java.util.ArrayList<String>();
+            reasons.add("printer-unreachable");
+        }
+        try {
+            JSONObject o = new JSONObject();
+            o.put("state", state);
+            o.put("reasons", new org.json.JSONArray(reasons));
+            http("POST", base + "/api/print/agent-report", token,
+                    o.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Throwable ignored) {}
     }
 
     private static String jstr(JSONObject o, String key) {
