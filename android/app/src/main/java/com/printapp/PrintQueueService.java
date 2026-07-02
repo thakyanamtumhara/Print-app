@@ -364,7 +364,7 @@ public class PrintQueueService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL)
                 : new Notification.Builder(this);
-        b.setContentTitle("WOD Printer")
+        b.setContentTitle("WOD Printer · build " + BuildConfig.VERSION_CODE)
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_menu_send)
                 .setOngoing(true)

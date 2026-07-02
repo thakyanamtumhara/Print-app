@@ -1279,6 +1279,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public String getAppVersion() {
+            return BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")";
+        }
+
+        @JavascriptInterface
         public String getQueueConfig() {
             SharedPreferences p = getSharedPreferences(PrintQueueService.PREFS, MODE_PRIVATE);
             JSONObject o = new JSONObject();

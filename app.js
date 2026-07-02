@@ -287,6 +287,27 @@ document.addEventListener('DOMContentLoaded', () => {
     dashBtn.style.display = 'flex';
   }
 
+  function appVersion() {
+    if (!window.AndroidBridge) return '';
+    try { return window.AndroidBridge.getAppVersion(); }
+    catch (e) { return 'OLD VERSION'; }
+  }
+
+  (function showVersionBadge() {
+    var v = appVersion();
+    if (!v) return;
+    var old = v === 'OLD VERSION';
+    var badge = document.createElement('div');
+    badge.id = 'appVersionBadge';
+    badge.textContent = old ? 'OLD VERSION — please update' : 'Print v' + v;
+    badge.style.cssText = 'position:fixed;left:10px;bottom:8px;z-index:60;font-size:' +
+      (old ? '13px;font-weight:700;color:#b45309;' : '11px;color:#98a1ad;') +
+      'pointer-events:none;font-family:-apple-system,system-ui,sans-serif;';
+    document.body.appendChild(badge);
+    var t = document.querySelector('#dashModal .dash-title');
+    if (t) t.textContent = '🖨 Dashboard · ' + (old ? 'OLD VERSION' : 'v' + v);
+  })();
+
   dashBtn.addEventListener('click', openDashModal);
   document.getElementById('dashCloseBtn').addEventListener('click', closeDashModal);
   dashModal.addEventListener('click', function(e) {
