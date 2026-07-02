@@ -139,6 +139,14 @@ public class PrintQueueService extends Service {
         int copies = Math.max(1, Math.min(5, job.optInt("copies", 1)));
         boolean duplex = job.optBoolean("duplex", false);
         String label = kind + (odid.isEmpty() ? "" : " #" + odid);
+
+        // The queue redelivers a job whose ack got lost (stale-claim requeue).
+        // Never print the same job id twice — ack the duplicate as done.
+        if (wasPrinted(id)) {
+            setStatus("Skipping duplicate " + label);
+            ack(base, token, id, true, "duplicate suppressed (already printed on this device)");
+            return;
+        }
         setStatus("Printing " + label + "…");
 
         boolean ok = false;
@@ -173,16 +181,51 @@ public class PrintQueueService extends Service {
             msg = shortMsg(t);
         }
 
+        if (ok) recordPrinted(id);
         String result = (ok ? "✓ " : "✗ ") + label + " — " + msg;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("lastResult", result).apply();
         setStatus(result);
-        try {
-            JSONObject ack = new JSONObject();
-            ack.put("id", id);
-            ack.put("ok", ok);
-            ack.put("message", msg);
-            http("POST", base + "/api/print/ack", token, ack.toString().getBytes(StandardCharsets.UTF_8));
-        } catch (Throwable ignored) {}
+        ack(base, token, id, ok, msg);
+    }
+
+    /** Ack with retries — a lost ack would otherwise re-queue (and re-print) the job. */
+    private void ack(String base, String token, String id, boolean ok, String msg) {
+        long[] backoff = {0, 3000, 10000, 30000, 60000};
+        for (int i = 0; i < backoff.length; i++) {
+            try {
+                if (backoff[i] > 0) Thread.sleep(backoff[i]);
+                JSONObject a = new JSONObject();
+                a.put("id", id);
+                a.put("ok", ok);
+                a.put("message", msg);
+                HttpResult r = http("POST", base + "/api/print/ack", token,
+                        a.toString().getBytes(StandardCharsets.UTF_8));
+                if (r.code == 200 || r.code == 404) return;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private boolean wasPrinted(String id) {
+        if (id.isEmpty()) return false;
+        String csv = getSharedPreferences(PREFS, MODE_PRIVATE).getString("printedIds", "");
+        return ("," + csv + ",").contains("," + id + ",");
+    }
+
+    private void recordPrinted(String id) {
+        if (id.isEmpty()) return;
+        SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String csv = p.getString("printedIds", "");
+        String[] parts = csv.isEmpty() ? new String[0] : csv.split(",");
+        StringBuilder sb = new StringBuilder();
+        int start = Math.max(0, parts.length - 99);
+        for (int i = start; i < parts.length; i++) {
+            if (!parts[i].isEmpty()) sb.append(parts[i]).append(',');
+        }
+        sb.append(id);
+        p.edit().putString("printedIds", sb.toString()).apply();
     }
 
     private static boolean looksLikeImage(byte[] d) {

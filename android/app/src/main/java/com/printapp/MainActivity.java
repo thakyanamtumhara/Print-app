@@ -1182,6 +1182,23 @@ public class MainActivity extends AppCompatActivity {
                 }
             }).start();
         }
+        // Doze suspends network for non-exempt apps — a relay phone that dozes
+        // stops polling the queue. Ask once for the battery-optimization
+        // exemption when the queue is switched on.
+        private void requestBatteryExemption() {
+            if (android.os.Build.VERSION.SDK_INT < 23) return;
+            try {
+                android.os.PowerManager pm =
+                        (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                    Intent i = new Intent(android.provider.Settings
+                            .ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    i.setData(android.net.Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
+                }
+            } catch (Throwable ignored) {}
+        }
+
         // ── Dashboard print-queue configuration ──
         @JavascriptInterface
         public void setQueueConfig(String json) {
@@ -1207,6 +1224,7 @@ public class MainActivity extends AppCompatActivity {
                 ed.apply();
                 if (enabled && PrintQueueService.isConfigured(MainActivity.this)) {
                     PrintQueueService.start(MainActivity.this);
+                    requestBatteryExemption();
                 } else {
                     PrintQueueService.stop(MainActivity.this);
                 }

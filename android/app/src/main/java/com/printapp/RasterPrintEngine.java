@@ -52,6 +52,10 @@ public final class RasterPrintEngine {
                                   boolean duplex, int copies, Progress cb) {
         Result res = new Result();
         File pdfFile = null, pwgFile = null;
+        ParcelFileDescriptor pfd = null;
+        PdfRenderer renderer = null;
+        OutputStream out = null;
+        Bitmap bmp = null;
         try {
             IppClient ipp = new IppClient(host);
             IppClient.Response caps = ipp.getPrinterAttributes();
@@ -66,13 +70,13 @@ public final class RasterPrintEngine {
             fo.close();
 
             pwgFile = File.createTempFile("job", ".pwg", ctx.getCacheDir());
-            ParcelFileDescriptor pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
-            PdfRenderer renderer = new PdfRenderer(pfd);
+            pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
+            renderer = new PdfRenderer(pfd);
             int total = renderer.getPageCount();
             res.pages = total;
-            OutputStream out = new BufferedOutputStream(new FileOutputStream(pwgFile), 256 * 1024);
+            out = new BufferedOutputStream(new FileOutputStream(pwgFile), 256 * 1024);
             PwgRasterEncoder.writeSyncWord(out);
-            Bitmap bmp = Bitmap.createBitmap(RW, RH, Bitmap.Config.ARGB_8888);
+            bmp = Bitmap.createBitmap(RW, RH, Bitmap.Config.ARGB_8888);
             byte[] gray = new byte[PW * PH];
             for (int i = 0; i < total; i++) {
                 if (cb != null) cb.onProgress("render", i + 1, total);
@@ -84,10 +88,8 @@ public final class RasterPrintEngine {
                 if (cb != null) cb.onProgress("encode", i + 1, total);
                 PwgRasterEncoder.writePage(out, gray, PW, PH, PRINT_DPI, duplex, total);
             }
-            bmp.recycle();
-            renderer.close();
-            pfd.close();
             out.close();
+            out = null;
 
             if (cb != null) cb.onProgress("send", total, total);
             IppClient.Response v = ipp.validateJob("image/pwg-raster");
@@ -98,31 +100,47 @@ public final class RasterPrintEngine {
             res.jobId = p.getInt("job-id", -1);
 
             if (cb != null) cb.onProgress("confirm", total, total);
-            if (res.jobId > 0) {
-                int st = ipp.waitForCompletion(res.jobId, 180000);
-                res.jobState = st;
-                if (st == IppClient.JOB_STATE_COMPLETED) {
-                    res.ok = true;
-                    res.message = "printed " + total + " page(s), job " + res.jobId + " completed";
-                } else if (st == IppClient.JOB_STATE_ABORTED || st == IppClient.JOB_STATE_CANCELED) {
-                    res.ok = false;
-                    res.message = "printer " + (st == 8 ? "aborted" : "canceled") + " job " + res.jobId;
-                } else {
-                    res.ok = true;
-                    res.message = "job " + res.jobId + " sent (state " + st + " at timeout)";
-                }
-            } else {
-                res.ok = true;
-                res.message = "job accepted (no job-id returned)";
-            }
+            judgeOutcome(ipp, res, total);
         } catch (Throwable t) {
             res.ok = false;
             res.message = t.getMessage() == null ? t.toString() : t.getMessage();
         } finally {
+            if (bmp != null) try { bmp.recycle(); } catch (Throwable ignored) {}
+            if (out != null) try { out.close(); } catch (Throwable ignored) {}
+            if (renderer != null) try { renderer.close(); } catch (Throwable ignored) {}
+            if (pfd != null) try { pfd.close(); } catch (Throwable ignored) {}
             if (pdfFile != null) pdfFile.delete();
             if (pwgFile != null) pwgFile.delete();
         }
         return res;
+    }
+
+    /**
+     * Success ONLY on a confirmed job-state=completed. Timeout/held/unknown is
+     * reported as failure with a check-the-printer message — a job stuck behind
+     * "out of paper" must never be recorded as printed (that was the old app's
+     * silent-loss mode).
+     */
+    private static void judgeOutcome(IppClient ipp, Result res, int totalPages) {
+        if (res.jobId <= 0) {
+            res.ok = false;
+            res.message = "job accepted but printer returned no job-id to confirm — check printer";
+            return;
+        }
+        int st = ipp.waitForCompletion(res.jobId, 300000);
+        res.jobState = st;
+        if (st == IppClient.JOB_STATE_COMPLETED) {
+            res.ok = true;
+            res.message = "printed " + totalPages + " page(s), job " + res.jobId + " completed";
+        } else if (st == IppClient.JOB_STATE_ABORTED || st == IppClient.JOB_STATE_CANCELED) {
+            res.ok = false;
+            res.message = "printer " + (st == IppClient.JOB_STATE_ABORTED ? "aborted" : "canceled")
+                    + " job " + res.jobId;
+        } else {
+            res.ok = false;
+            res.message = "job " + res.jobId + " NOT confirmed after 5 min (state " + st
+                    + ") — check paper/jam at printer";
+        }
     }
 
     /** Prints a list of already-rendered page bitmaps (image/label path). */
@@ -130,6 +148,8 @@ public final class RasterPrintEngine {
                                       boolean duplex, int copies, Progress cb) {
         Result res = new Result();
         File pwgFile = null;
+        OutputStream out = null;
+        Bitmap canvasBmp = null;
         try {
             IppClient ipp = new IppClient(host);
             IppClient.Response caps = ipp.getPrinterAttributes();
@@ -138,11 +158,11 @@ public final class RasterPrintEngine {
                 throw new IOException("printer does not support PWG raster");
 
             pwgFile = File.createTempFile("job", ".pwg", ctx.getCacheDir());
-            OutputStream out = new BufferedOutputStream(new FileOutputStream(pwgFile), 256 * 1024);
+            out = new BufferedOutputStream(new FileOutputStream(pwgFile), 256 * 1024);
             PwgRasterEncoder.writeSyncWord(out);
             int total = pages.size();
             res.pages = total;
-            Bitmap canvasBmp = Bitmap.createBitmap(RW, RH, Bitmap.Config.ARGB_8888);
+            canvasBmp = Bitmap.createBitmap(RW, RH, Bitmap.Config.ARGB_8888);
             Canvas canvas = new Canvas(canvasBmp);
             Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
             byte[] gray = new byte[PW * PH];
@@ -156,21 +176,19 @@ public final class RasterPrintEngine {
                 if (duplex && (i % 2) == 1) PwgRasterEncoder.rotate180(gray);
                 PwgRasterEncoder.writePage(out, gray, PW, PH, PRINT_DPI, duplex, total);
             }
-            canvasBmp.recycle();
             out.close();
+            out = null;
 
             IppClient.Response p = ipp.printJob(pwgFile, jobName, "image/pwg-raster", duplex, copies);
             if (!p.ok()) throw new IOException("Print-Job rejected: 0x" + Integer.toHexString(p.status));
             res.jobId = p.getInt("job-id", -1);
-            int st = res.jobId > 0 ? ipp.waitForCompletion(res.jobId, 180000) : -1;
-            res.jobState = st;
-            res.ok = res.jobId <= 0 || st == IppClient.JOB_STATE_COMPLETED
-                    || (st != IppClient.JOB_STATE_ABORTED && st != IppClient.JOB_STATE_CANCELED);
-            res.message = res.ok ? ("printed " + total + " page(s)") : ("printer aborted job " + res.jobId);
+            judgeOutcome(ipp, res, total);
         } catch (Throwable t) {
             res.ok = false;
             res.message = t.getMessage() == null ? t.toString() : t.getMessage();
         } finally {
+            if (canvasBmp != null) try { canvasBmp.recycle(); } catch (Throwable ignored) {}
+            if (out != null) try { out.close(); } catch (Throwable ignored) {}
             if (pwgFile != null) pwgFile.delete();
         }
         return res;

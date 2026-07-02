@@ -171,34 +171,55 @@ public final class IppClient {
 
     private Response send(byte[] ippHeader, InputStream doc, long docLen, int timeoutMs) throws IOException {
         URL url = new URL("http", host, port, path);
-        HttpURLConnection c = (HttpURLConnection) url.openConnection();
-        c.setConnectTimeout(8000);
-        c.setReadTimeout(timeoutMs);
-        c.setDoOutput(true);
-        c.setRequestMethod("POST");
-        c.setRequestProperty("Content-Type", "application/ipp");
-        long total = ippHeader.length + (doc != null ? docLen : 0);
-        if (total <= Integer.MAX_VALUE) c.setFixedLengthStreamingMode((int) total);
-        else c.setChunkedStreamingMode(64 * 1024);
-        OutputStream out = c.getOutputStream();
-        out.write(ippHeader);
-        if (doc != null) {
-            byte[] buf = new byte[64 * 1024];
+        final HttpURLConnection c = (HttpURLConnection) url.openConnection();
+        // OutputStream.write is not covered by readTimeout and cannot be
+        // interrupted — a printer dying mid-upload would wedge the caller
+        // forever. The watchdog force-disconnects past the deadline.
+        final java.util.Timer watchdog = new java.util.Timer("ipp-watchdog", true);
+        watchdog.schedule(new java.util.TimerTask() {
+            @Override public void run() {
+                try { c.disconnect(); } catch (Throwable ignored) {}
+            }
+        }, (long) timeoutMs + 30000L);
+        try {
+            c.setConnectTimeout(8000);
+            c.setReadTimeout(timeoutMs);
+            c.setDoOutput(true);
+            c.setRequestMethod("POST");
+            c.setRequestProperty("Content-Type", "application/ipp");
+            long total = ippHeader.length + (doc != null ? docLen : 0);
+            if (total <= Integer.MAX_VALUE) c.setFixedLengthStreamingMode((int) total);
+            else c.setChunkedStreamingMode(64 * 1024);
+            OutputStream out = c.getOutputStream();
+            out.write(ippHeader);
+            if (doc != null) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = doc.read(buf)) > 0) out.write(buf, 0, n);
+            }
+            out.flush();
+            out.close();
+            int http = c.getResponseCode();
+            if (http != 200) {
+                InputStream err = c.getErrorStream();
+                if (err != null) {
+                    byte[] buf = new byte[4096];
+                    while (err.read(buf) > 0) { /* drain so the socket can be reused/closed */ }
+                    err.close();
+                }
+                throw new IOException("IPP HTTP " + http);
+            }
+            InputStream in = c.getInputStream();
+            ByteArrayOutputStream resp = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
             int n;
-            while ((n = doc.read(buf)) > 0) out.write(buf, 0, n);
+            while ((n = in.read(buf)) > 0) resp.write(buf, 0, n);
+            in.close();
+            return parse(resp.toByteArray());
+        } finally {
+            watchdog.cancel();
+            try { c.disconnect(); } catch (Throwable ignored) {}
         }
-        out.flush();
-        out.close();
-        int http = c.getResponseCode();
-        if (http != 200) throw new IOException("IPP HTTP " + http);
-        InputStream in = c.getInputStream();
-        ByteArrayOutputStream resp = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
-        int n;
-        while ((n = in.read(buf)) > 0) resp.write(buf, 0, n);
-        in.close();
-        c.disconnect();
-        return parse(resp.toByteArray());
     }
 
     private static Response parse(byte[] b) {
