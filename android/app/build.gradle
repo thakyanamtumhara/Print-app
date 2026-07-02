@@ -6,12 +6,13 @@ def bn = (project.hasProperty('buildNumber') ? buildNumber.toString() : '1').toI
 
 android {
     namespace 'com.printapp'
-    compileSdk 34
+    // Play requires new apps to target the previous year's API level (35 in 2026)
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.printapp"
         minSdk 24
-        targetSdk 34
+        targetSdk 35
         versionCode bn
         versionName "2." + bn
     }
@@ -20,10 +21,25 @@ android {
         buildConfig true
     }
 
+    // Upload signing for Play (keystore comes from CI secrets / local env);
+    // absent env vars leave release unsigned so debug builds are unaffected.
+    def ksFile = System.getenv('UPLOAD_KEYSTORE_FILE')
+    signingConfigs {
+        if (ksFile != null) {
+            upload {
+                storeFile file(ksFile)
+                storePassword System.getenv('UPLOAD_KEYSTORE_PASS')
+                keyAlias System.getenv('UPLOAD_KEY_ALIAS') ?: 'printupload'
+                keyPassword System.getenv('UPLOAD_KEY_PASS') ?: System.getenv('UPLOAD_KEYSTORE_PASS')
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (ksFile != null) signingConfig signingConfigs.upload
         }
         debug {
             debuggable true
