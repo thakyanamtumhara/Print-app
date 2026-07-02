@@ -129,38 +129,41 @@
       </div>
     </div>
 
-    <div id="dashModal" class="dash-overlay" style="display:none">
-      <div class="dash-card">
-        <div class="dash-title">&#128424; Dashboard</div>
-        <label class="dash-label" for="dashWodUrl">WOD URL</label>
-        <input id="dashWodUrl" class="dash-input" type="url" placeholder="https://track.sale91.com" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <label class="dash-label" for="dashToken">Token</label>
-        <input id="dashToken" class="dash-input" type="password" placeholder="Access token">
-        <label class="dash-label" for="dashPrinterIp">Printer IP</label>
-        <input id="dashPrinterIp" class="dash-input" type="text" placeholder="192.168.1.112" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <div class="dash-toggle-row">
-          <span>Auto-print dashboard jobs</span>
-          <label class="dash-switch">
-            <input id="dashEnabled" type="checkbox">
-            <span class="dash-knob"></span>
-          </label>
-        </div>
-        <div id="dashPing" class="dash-ping"></div>
-        <div class="dash-btn-row">
-          <button id="dashTestBtn" class="dash-btn secondary">Test</button>
-          <button id="dashUpdateBtn" class="dash-btn secondary">Check update</button>
-        </div>
-        <div id="dashStatus" class="dash-status"></div>
-        <div class="dash-btn-row">
-          <button id="dashCloseBtn" class="dash-btn secondary">Close</button>
-          <button id="dashSaveBtn" class="dash-btn primary">Save</button>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- Hidden: tiled print area -->
   <div id="printArea"></div>
+
+  <!-- Dashboard modal: direct child of body with inline-critical styles so it
+       renders full-size even if styles.css is stale or an ancestor clips -->
+  <div id="dashModal" class="dash-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:2147483000;padding:16px;box-sizing:border-box;">
+    <div class="dash-card" style="background:#fff;border-radius:16px;padding:20px;width:100%;max-width:420px;max-height:88vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,0.25);box-sizing:border-box;">
+      <div class="dash-title" style="font-size:18px;font-weight:600;color:#111;margin-bottom:14px;">&#128424; Dashboard</div>
+      <label class="dash-label" for="dashWodUrl" style="display:block;font-size:13px;color:#555;margin:10px 0 4px;">WOD URL</label>
+      <input id="dashWodUrl" class="dash-input" type="url" placeholder="https://track.sale91.com" autocapitalize="off" autocorrect="off" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;padding:11px 12px;font-size:16px;border:1px solid #ccc;border-radius:9px;">
+      <label class="dash-label" for="dashToken" style="display:block;font-size:13px;color:#555;margin:10px 0 4px;">Token</label>
+      <input id="dashToken" class="dash-input" type="password" placeholder="Access token" style="display:block;width:100%;box-sizing:border-box;padding:11px 12px;font-size:16px;border:1px solid #ccc;border-radius:9px;">
+      <label class="dash-label" for="dashPrinterIp" style="display:block;font-size:13px;color:#555;margin:10px 0 4px;">Printer IP</label>
+      <input id="dashPrinterIp" class="dash-input" type="text" placeholder="192.168.1.112" autocapitalize="off" autocorrect="off" spellcheck="false" style="display:block;width:100%;box-sizing:border-box;padding:11px 12px;font-size:16px;border:1px solid #ccc;border-radius:9px;">
+      <div class="dash-toggle-row" style="display:flex;align-items:center;justify-content:space-between;margin:16px 0 6px;font-size:15px;color:#222;">
+        <span>Auto-print dashboard jobs</span>
+        <label class="dash-switch">
+          <input id="dashEnabled" type="checkbox" style="width:22px;height:22px;">
+          <span class="dash-knob"></span>
+        </label>
+      </div>
+      <div id="dashPing" class="dash-ping" style="min-height:18px;font-size:13px;margin:6px 0;"></div>
+      <div class="dash-btn-row" style="display:flex;gap:10px;margin-top:10px;">
+        <button id="dashTestBtn" class="dash-btn secondary" style="flex:1;padding:12px;font-size:15px;border-radius:10px;border:1px solid #ccc;background:#f4f4f6;color:#111;">Test</button>
+        <button id="dashUpdateBtn" class="dash-btn secondary" style="flex:1;padding:12px;font-size:15px;border-radius:10px;border:1px solid #ccc;background:#f4f4f6;color:#111;">Check update</button>
+      </div>
+      <div id="dashStatus" class="dash-status" style="min-height:18px;font-size:13px;color:#666;margin:8px 0;"></div>
+      <div class="dash-btn-row" style="display:flex;gap:10px;margin-top:6px;">
+        <button id="dashCloseBtn" class="dash-btn secondary" style="flex:1;padding:12px;font-size:15px;border-radius:10px;border:1px solid #ccc;background:#f4f4f6;color:#111;">Close</button>
+        <button id="dashSaveBtn" class="dash-btn primary" style="flex:1;padding:12px;font-size:15px;border-radius:10px;border:0;background:#0a84ff;color:#fff;font-weight:600;">Save</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Fix WebView height: set pixels before overflow:hidden clips content -->
   <script>
