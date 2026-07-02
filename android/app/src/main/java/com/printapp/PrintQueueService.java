@@ -131,11 +131,13 @@ public class PrintQueueService extends Service {
     }
 
     private void handleJob(JSONObject job, String base, String token, String printerIp) {
-        String id = job.optString("id", "");
-        String kind = job.optString("kind", "doc");
-        String odid = job.optString("odid", "");
-        String url = job.optString("url", "");
-        String dataB64 = job.optString("dataB64", "");
+        // org.json turns JSON null into the literal string "null" via optString
+        // — that poisoned dataB64 into base64("null") = 3 garbage bytes.
+        String id = jstr(job, "id");
+        String kind = jstr(job, "kind").isEmpty() ? "doc" : jstr(job, "kind");
+        String odid = jstr(job, "odid");
+        String url = jstr(job, "url");
+        String dataB64 = jstr(job, "dataB64");
         int copies = Math.max(1, Math.min(5, job.optInt("copies", 1)));
         boolean duplex = job.optBoolean("duplex", false);
         String label = kind + (odid.isEmpty() ? "" : " #" + odid);
@@ -156,9 +158,24 @@ public class PrintQueueService extends Service {
             if (dataB64 != null && !dataB64.isEmpty()) {
                 doc = Base64.decode(dataB64, Base64.DEFAULT);
             } else if (url != null && !url.isEmpty()) {
-                doc = download(url);
+                // Prefer the dashboard's fetch-proxy (single proven origin);
+                // fall back to the direct CDN URL if the proxy is unavailable.
+                byte[] viaProxy = null;
+                try {
+                    viaProxy = download(base + "/api/print/fetch/" + id, token);
+                } catch (Throwable ignored) {}
+                doc = viaProxy != null ? viaProxy : download(url, null);
             } else {
                 throw new IOException("job has neither url nor data");
+            }
+            if (doc.length > 2 && (doc[0] & 0xFF) == 0x1F && (doc[1] & 0xFF) == 0x8B) {
+                doc = gunzip(doc);
+            }
+            int pdfAt = pdfOffset(doc);
+            if (pdfAt > 0) {
+                byte[] trimmed = new byte[doc.length - pdfAt];
+                System.arraycopy(doc, pdfAt, trimmed, 0, trimmed.length);
+                doc = trimmed;
             }
             RasterPrintEngine.Result res;
             if (doc.length > 4 && doc[0] == '%' && doc[1] == 'P' && doc[2] == 'D' && doc[3] == 'F') {
@@ -173,7 +190,13 @@ public class PrintQueueService extends Service {
                         false, copies, null);
                 bmp.recycle();
             } else {
-                throw new IOException("unsupported document type (not PDF/image)");
+                StringBuilder hex = new StringBuilder();
+                for (int i = 0; i < Math.min(doc.length, 16); i++)
+                    hex.append(String.format("%02x", doc[i] & 0xFF));
+                String peek = new String(doc, 0, Math.min(doc.length, 80), StandardCharsets.UTF_8)
+                        .replaceAll("[^\\x20-\\x7E]", ".");
+                throw new IOException("unsupported document (" + doc.length + "B, hex " + hex
+                        + ", '" + peek + "')");
             }
             ok = res.ok;
             msg = res.message;
@@ -228,17 +251,28 @@ public class PrintQueueService extends Service {
         p.edit().putString("printedIds", sb.toString()).apply();
     }
 
+    private static String jstr(JSONObject o, String key) {
+        if (o == null || o.isNull(key)) return "";
+        String v = o.optString(key, "");
+        return "null".equals(v) ? "" : v;
+    }
+
     private static boolean looksLikeImage(byte[] d) {
         if (d.length < 4) return false;
         if ((d[0] & 0xFF) == 0xFF && (d[1] & 0xFF) == 0xD8) return true;               // JPEG
         return (d[0] & 0xFF) == 0x89 && d[1] == 'P' && d[2] == 'N' && d[3] == 'G';     // PNG
     }
 
-    private byte[] download(String url) throws IOException {
+    private byte[] download(String url, String token) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(15000);
         c.setReadTimeout(60000);
         c.setInstanceFollowRedirects(true);
+        // Some CDNs/bot filters serve challenge pages to the default Java UA
+        c.setRequestProperty("User-Agent",
+                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 printapp");
+        c.setRequestProperty("Accept", "application/pdf,image/*,*/*");
+        if (token != null) c.setRequestProperty("x-print-token", token);
         int code = c.getResponseCode();
         if (code != 200) throw new IOException("download HTTP " + code);
         InputStream in = c.getInputStream();
@@ -249,6 +283,26 @@ public class PrintQueueService extends Service {
         in.close();
         c.disconnect();
         return out.toByteArray();
+    }
+
+    private static byte[] gunzip(byte[] d) throws IOException {
+        java.util.zip.GZIPInputStream g =
+                new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(d));
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[64 * 1024];
+        int n;
+        while ((n = g.read(buf)) > 0) out.write(buf, 0, n);
+        g.close();
+        return out.toByteArray();
+    }
+
+    /** Finds "%PDF" within the first 1KB (some servers prepend padding/BOM). */
+    private static int pdfOffset(byte[] d) {
+        int limit = Math.min(d.length - 4, 1024);
+        for (int i = 0; i <= limit; i++) {
+            if (d[i] == '%' && d[i + 1] == 'P' && d[i + 2] == 'D' && d[i + 3] == 'F') return i;
+        }
+        return -1;
     }
 
     private static class HttpResult { int code; byte[] body = new byte[0]; }
