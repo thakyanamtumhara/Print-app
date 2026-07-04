@@ -48,6 +48,8 @@ public class PrintQueueService extends Service {
     private WifiManager.WifiLock wifiLock;
     private volatile String lastStatus = "starting";
     private long lastHealthReport = 0;
+    private long lastProbeAt = 0;
+    private boolean lastProbeOk = false;
 
     public static void start(Context ctx) {
         Intent i = new Intent(ctx, PrintQueueService.class);
@@ -107,6 +109,14 @@ public class PrintQueueService extends Service {
                 if (base.isEmpty() || token.isEmpty() || printerIp.isEmpty()) {
                     setStatus("Print queue: not configured");
                     sleep = ERROR_BACKOFF_MS;
+                } else if (!printerReachableNow(printerIp)) {
+                    // Several phones can carry this relay. One that can't reach
+                    // the printer (left the godam WiFi / printer off) must not
+                    // claim jobs — it would fail them while an on-site phone
+                    // sits idle — and must not stamp its bogus printer state
+                    // over the on-site phone's health reports. Pause both.
+                    setStatus("Print queue: printer not reachable — paused (on godam WiFi?)");
+                    sleep = ERROR_BACKOFF_MS;
                 } else {
                     if (System.currentTimeMillis() - lastHealthReport > 60000) {
                         lastHealthReport = System.currentTimeMillis();
@@ -151,7 +161,7 @@ public class PrintQueueService extends Service {
         // Never print the same job id twice — ack the duplicate as done.
         if (wasPrinted(id)) {
             setStatus("Skipping duplicate " + label);
-            ack(base, token, id, true, "duplicate suppressed (already printed on this device)");
+            ack(base, token, id, true, "duplicate suppressed (already printed on this device)", false);
             return;
         }
         setStatus("Printing " + label + "…");
@@ -213,11 +223,35 @@ public class PrintQueueService extends Service {
         String result = (ok ? "✓ " : "✗ ") + label + " — " + msg;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("lastResult", result).apply();
         setStatus(result);
-        ack(base, token, id, ok, msg);
+        // Failures hand the job back to the queue (another phone may print
+        // it); the claim path's MAX_TRIES cap keeps poison jobs terminal.
+        ack(base, token, id, ok, msg, !ok);
+    }
+
+    /**
+     * TCP probe of the printer's IPP port, cached for 20s. Gates the queue
+     * poll: a phone that can't reach the printer stays out of the relay
+     * fleet until it can again. Cheap when reachable (instant connect);
+     * costs at most one 1.5s timeout per 20s when not.
+     */
+    private boolean printerReachableNow(String ip) {
+        long now = System.currentTimeMillis();
+        if (now - lastProbeAt < 20000) return lastProbeOk;
+        lastProbeAt = now;
+        java.net.Socket s = new java.net.Socket();
+        try {
+            s.connect(new java.net.InetSocketAddress(ip, 631), 1500);
+            lastProbeOk = true;
+        } catch (Throwable t) {
+            lastProbeOk = false;
+        } finally {
+            try { s.close(); } catch (Throwable ignored) {}
+        }
+        return lastProbeOk;
     }
 
     /** Ack with retries — a lost ack would otherwise re-queue (and re-print) the job. */
-    private void ack(String base, String token, String id, boolean ok, String msg) {
+    private void ack(String base, String token, String id, boolean ok, String msg, boolean requeue) {
         long[] backoff = {0, 3000, 10000, 30000, 60000};
         for (int i = 0; i < backoff.length; i++) {
             try {
@@ -226,6 +260,7 @@ public class PrintQueueService extends Service {
                 a.put("id", id);
                 a.put("ok", ok);
                 a.put("message", msg);
+                if (requeue) a.put("requeue", true);
                 HttpResult r = http("POST", base + "/api/print/ack", token,
                         a.toString().getBytes(StandardCharsets.UTF_8));
                 if (r.code == 200 || r.code == 404) return;
