@@ -125,8 +125,16 @@ public class PrintQueueService extends Service {
                     HttpResult r = http("GET", base + "/api/print/next", token, null);
                     if (r.code == 200 && r.body.length > 0) {
                         JSONObject job = new JSONObject(new String(r.body, StandardCharsets.UTF_8));
-                        handleJob(job, base, token, printerIp);
-                        sleep = 500; // drain queue quickly
+                        if (handleJob(job, base, token, printerIp)) {
+                            sleep = 500; // drain queue quickly
+                        } else {
+                            // Failed job: back off so another phone gets first
+                            // shot at the requeued job (its 5s poll beats our
+                            // 15s), and re-probe the printer next cycle — we
+                            // may have just left the godam WiFi.
+                            lastProbeAt = 0;
+                            sleep = ERROR_BACKOFF_MS;
+                        }
                     } else if (r.code == 204) {
                         setStatus("Print queue: idle · " + prefs.getString("lastResult", "no jobs yet"));
                     } else if (r.code == 401 || r.code == 403) {
@@ -145,7 +153,8 @@ public class PrintQueueService extends Service {
         }
     }
 
-    private void handleJob(JSONObject job, String base, String token, String printerIp) {
+    /** @return true when the job printed (or was a suppressed duplicate). */
+    private boolean handleJob(JSONObject job, String base, String token, String printerIp) {
         // org.json turns JSON null into the literal string "null" via optString
         // — that poisoned dataB64 into base64("null") = 3 garbage bytes.
         String id = jstr(job, "id");
@@ -155,18 +164,22 @@ public class PrintQueueService extends Service {
         String dataB64 = jstr(job, "dataB64");
         int copies = Math.max(1, Math.min(5, job.optInt("copies", 1)));
         boolean duplex = job.optBoolean("duplex", false);
+        // Claim stamp from /next — echoed in the ack so the server can tell
+        // a live claim's ack from a late retry after the claim moved on.
+        long claimedAt = job.optLong("claimedAt", 0);
         String label = kind + (odid.isEmpty() ? "" : " #" + odid);
 
         // The queue redelivers a job whose ack got lost (stale-claim requeue).
         // Never print the same job id twice — ack the duplicate as done.
         if (wasPrinted(id)) {
             setStatus("Skipping duplicate " + label);
-            ack(base, token, id, true, "duplicate suppressed (already printed on this device)", false);
-            return;
+            ack(base, token, id, true, "duplicate suppressed (already printed on this device)", false, claimedAt);
+            return true;
         }
         setStatus("Printing " + label + "…");
 
         boolean ok = false;
+        boolean submitted = false;
         String msg;
         try {
             byte[] doc;
@@ -214,6 +227,11 @@ public class PrintQueueService extends Service {
                         + ", '" + peek + "')");
             }
             ok = res.ok;
+            // job-id assigned = the printer ACCEPTED the job into its spool.
+            // It may still come out later (paper refilled, jam cleared) and
+            // we can't cancel it (no Cancel-Job in IppClient) — requeueing a
+            // spooled job would print a duplicate copy.
+            submitted = res.jobId > 0;
             msg = res.message;
         } catch (Throwable t) {
             msg = shortMsg(t);
@@ -223,9 +241,12 @@ public class PrintQueueService extends Service {
         String result = (ok ? "✓ " : "✗ ") + label + " — " + msg;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("lastResult", result).apply();
         setStatus(result);
-        // Failures hand the job back to the queue (another phone may print
-        // it); the claim path's MAX_TRIES cap keeps poison jobs terminal.
-        ack(base, token, id, ok, msg, !ok);
+        // Hand the job back to the queue ONLY when it never reached the
+        // printer (fetch/decode/connect/reject failure) — another phone can
+        // print it, and the claim path's MAX_TRIES cap keeps poison jobs
+        // terminal. Spooled-but-unconfirmed failures stay terminal errors.
+        ack(base, token, id, ok, msg, !ok && !submitted, claimedAt);
+        return ok;
     }
 
     /**
@@ -251,7 +272,7 @@ public class PrintQueueService extends Service {
     }
 
     /** Ack with retries — a lost ack would otherwise re-queue (and re-print) the job. */
-    private void ack(String base, String token, String id, boolean ok, String msg, boolean requeue) {
+    private void ack(String base, String token, String id, boolean ok, String msg, boolean requeue, long claimedAt) {
         long[] backoff = {0, 3000, 10000, 30000, 60000};
         for (int i = 0; i < backoff.length; i++) {
             try {
@@ -261,6 +282,7 @@ public class PrintQueueService extends Service {
                 a.put("ok", ok);
                 a.put("message", msg);
                 if (requeue) a.put("requeue", true);
+                if (claimedAt > 0) a.put("claimedAt", claimedAt);
                 HttpResult r = http("POST", base + "/api/print/ack", token,
                         a.toString().getBytes(StandardCharsets.UTF_8));
                 if (r.code == 200 || r.code == 404) return;
